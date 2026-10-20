@@ -10,6 +10,31 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --color-hud-bg: #0c1130;
+  --color-hud-panel: #1c2552;
+  --color-hud-line: #2a3366;
+  --color-hud-text: #eaf0ff;
+  --color-hud-muted: #8f9bc7;
+  --color-hud-gold: #f2c14e;
+  --color-hud-gold-soft: #ffe39a;
+  --color-hud-ice: #8fe3ff;
+  --color-hud-red: #ff4d5e;
+  --color-hud-green: #3ddc97;
+  --font-hud-num: var(--font-teko), Impact, sans-serif;
+  --font-hud-ui: var(--font-rajdhani), "Segoe UI Semibold", system-ui, sans-serif;
+
+  --color-panel: #0f1012;
+  --color-panel-side: #141518;
+  --color-panel-raised: #1a1c20;
+  --color-panel-hover: #23262c;
+  --color-panel-line: #2b2e35;
+  --color-panel-text: #e8eaee;
+  --color-panel-muted: #8c93a1;
+  --color-panel-accent: #f2c14e;
+  --color-panel-accent-ink: #1a1303;
+  --color-panel-ok: #3ddc97;
+  --color-panel-bad: #ff5c6c;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,3 +49,28 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* OVERLAY: halaman overlay transparan, tanpa scrollbar */
+html:has(.overlay-root),
+body:has(.overlay-root) {
+  background: transparent;
+  overflow: hidden;
+}
+
+.overlay-root {
+  position: fixed;
+  inset: 0;
+  container-type: size;
+  font-family: var(--font-hud-ui);
+  font-weight: 600;
+  color: var(--color-hud-text);
+  pointer-events: none;
+  user-select: none;
+}
+/* END OVERLAY */
+
+/* PANEL: panel kontrol selalu gelap, tidak ikut tema OS */
+.panel-root {
+  color-scheme: dark;
+}
+/* END PANEL */
