@@ -1,16 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button, Card, ErrorNote } from "@/components/panel/ui";
+import { HotkeyCard } from "@/components/panel/ml/pengaturan-hotkey";
+import { Button, Card, ErrorNote, inputClass } from "@/components/panel/ui";
 import { Scoreboard } from "@/games/ml/hud/scoreboard";
 import {
   SCOREBOARD_LABELS,
   SCOREBOARD_PRESETS,
+  SESSION_LIMITS,
   parseMLSettings,
   sameScoreboard,
+  sameSession,
   type MLSettings,
   type ScoreboardKey,
   type ScoreboardSettings,
+  type SessionSettings,
 } from "@/games/ml/settings";
 import { ML_GAME_ID, initialMLState, type MLState } from "@/games/ml/state";
 import { sendSettings } from "@/lib/send-settings";
@@ -18,14 +22,18 @@ import { useGameSettings } from "@/lib/use-game-state";
 
 const SAVED_MS = 2000;
 const PREVIEW_WIDTH = 440;
-const PREVIEW_HEIGHT = 450;
+const PREVIEW_HEIGHT = 560;
 
 const GROUPS: { title: string; keys: ScoreboardKey[] }[] = [
   { title: "Judul", keys: ["title", "hero"] },
   { title: "Hasil sesi", keys: ["win", "lose", "streak", "winrate"] },
   { title: "Match berjalan", keys: ["kill", "death", "assist", "ratio"] },
+  { title: "Riwayat, target, dan timer", keys: ["history", "goalWin", "goalStreak", "goalLose", "timer"] },
   { title: "Lainnya", keys: ["records"] },
 ];
+
+const GOAL_KEYS = { goalWin: "win", goalStreak: "streak", goalLose: "lose" } as const;
+type GoalField = (typeof GOAL_KEYS)[keyof typeof GOAL_KEYS];
 
 const SAMPLE: MLState = {
   ...initialMLState(),
@@ -33,11 +41,39 @@ const SAMPLE: MLState = {
   match: { k: 7, d: 2, a: 11 },
   session: { wins: 5, losses: 2, streak: 3, best: 4 },
   records: { firstblood: 1, doublekill: 2, triplekill: 1, maniac: 0, savage: 0, legendary: 0, mvp: 1 },
+  results: ["W", "W", "L", "W", "W", "L", "W", "W"],
+  lastDurationMs: 754_000,
 };
 
+interface Draft {
+  flags: ScoreboardSettings;
+  goals: Record<GoalField, string>;
+  historyCount: number;
+}
+
+function toDraft(flags: ScoreboardSettings, session: SessionSettings): Draft {
+  return {
+    flags,
+    goals: { win: String(session.goals.win), streak: String(session.goals.streak), lose: String(session.goals.lose) },
+    historyCount: session.historyCount,
+  };
+}
+
+function toSession(draft: Draft): SessionSettings | null {
+  const goals = {} as SessionSettings["goals"];
+  for (const field of ["win", "streak", "lose"] as const) {
+    const text = draft.goals[field].trim();
+    const value = Number(text);
+    if (text === "" || !Number.isInteger(value)) return null;
+    if (value < SESSION_LIMITS.goalMin || value > SESSION_LIMITS.goalMax) return null;
+    goals[field] = value;
+  }
+  return { goals, historyCount: draft.historyCount };
+}
+
 // SECTION: SCOREBOARD
-function ScoreboardSettingsCard({ saved }: { saved: ScoreboardSettings }) {
-  const [draft, setDraft] = useState<ScoreboardSettings | null>(null);
+function ScoreboardSettingsCard({ saved, savedSession }: { saved: ScoreboardSettings; savedSession: SessionSettings }) {
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,21 +86,23 @@ function ScoreboardSettingsCard({ saved }: { saved: ScoreboardSettings }) {
     [],
   );
 
-  const current = draft ?? saved;
-  const dirty = draft !== null && !sameScoreboard(draft, saved);
-  const allHidden = Object.values(current).every((value) => !value);
+  const current = draft ?? toDraft(saved, savedSession);
+  const parsedSession = toSession(current);
+  const dirty =
+    draft !== null && (!sameScoreboard(draft.flags, saved) || parsedSession === null || !sameSession(parsedSession, savedSession));
+  const allHidden = Object.values(current.flags).every((value) => !value);
 
-  function choose(next: ScoreboardSettings): void {
+  function change(next: Draft): void {
     setDraft(next);
     setJustSaved(false);
     setError(null);
   }
 
   async function save(): Promise<void> {
-    if (!draft || saving) return;
+    if (!draft || !parsedSession || saving) return;
     setSaving(true);
     setError(null);
-    const result = await sendSettings(ML_GAME_ID, { scoreboard: draft });
+    const result = await sendSettings(ML_GAME_ID, { scoreboard: draft.flags, session: parsedSession });
     setSaving(false);
     if (!result.ok) {
       setError(result.error);
@@ -92,14 +130,14 @@ function ScoreboardSettingsCard({ saved }: { saved: ScoreboardSettings }) {
             <p className="mb-2 text-xs text-panel-muted">Preset</p>
             <div className="flex flex-wrap gap-2">
               {SCOREBOARD_PRESETS.map((preset) => {
-                const active = sameScoreboard(current, preset.values);
+                const active = sameScoreboard(current.flags, preset.values);
                 return (
                   <Button
                     key={preset.id}
                     size="sm"
                     tone={active ? "accent" : "neutral"}
                     aria-pressed={active}
-                    onClick={() => choose({ ...preset.values })}
+                    onClick={() => change({ ...current, flags: { ...preset.values } })}
                   >
                     {preset.label}
                   </Button>
@@ -112,17 +150,72 @@ function ScoreboardSettingsCard({ saved }: { saved: ScoreboardSettings }) {
             <fieldset key={group.title}>
               <legend className="mb-2 text-xs text-panel-muted">{group.title}</legend>
               <div className="space-y-1.5">
-                {group.keys.map((key) => (
-                  <label key={key} className="flex cursor-pointer items-center gap-2.5 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={current[key]}
-                      onChange={(event) => choose({ ...current, [key]: event.target.checked })}
-                      className="h-4 w-4 accent-panel-accent"
-                    />
-                    {SCOREBOARD_LABELS[key]}
-                  </label>
-                ))}
+                {group.keys.map((key) => {
+                  const goalField = key in GOAL_KEYS ? GOAL_KEYS[key as keyof typeof GOAL_KEYS] : null;
+                  const goalInvalid =
+                    goalField !== null &&
+                    (() => {
+                      const value = Number(current.goals[goalField]);
+                      return (
+                        current.goals[goalField].trim() === "" ||
+                        !Number.isInteger(value) ||
+                        value < SESSION_LIMITS.goalMin ||
+                        value > SESSION_LIMITS.goalMax
+                      );
+                    })();
+                  return (
+                    <div key={key} className="flex flex-wrap items-center gap-2.5">
+                      <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={current.flags[key]}
+                          onChange={(event) => change({ ...current, flags: { ...current.flags, [key]: event.target.checked } })}
+                          className="h-4 w-4 accent-panel-accent"
+                        />
+                        {SCOREBOARD_LABELS[key]}
+                      </label>
+                      {goalField !== null && (
+                        <>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={SESSION_LIMITS.goalMin}
+                            max={SESSION_LIMITS.goalMax}
+                            value={current.goals[goalField]}
+                            onChange={(event) =>
+                              change({ ...current, goals: { ...current.goals, [goalField]: event.target.value } })
+                            }
+                            aria-label={`Angka ${SCOREBOARD_LABELS[key]}`}
+                            aria-invalid={goalInvalid}
+                            className={`${inputClass} w-20`}
+                          />
+                          {goalInvalid && (
+                            <span className="text-xs text-panel-bad">
+                              {SESSION_LIMITS.goalMin}-{SESSION_LIMITS.goalMax}
+                            </span>
+                          )}
+                        </>
+                      )}
+                      {key === "history" && (
+                        <select
+                          value={current.historyCount}
+                          onChange={(event) => change({ ...current, historyCount: Number(event.target.value) })}
+                          aria-label="Jumlah match di riwayat"
+                          className={`${inputClass} w-24`}
+                        >
+                          {Array.from(
+                            { length: SESSION_LIMITS.historyMax - SESSION_LIMITS.historyMin + 1 },
+                            (_, index) => SESSION_LIMITS.historyMin + index,
+                          ).map((count) => (
+                            <option key={count} value={count}>
+                              {count} match
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </fieldset>
           ))}
@@ -135,7 +228,7 @@ function ScoreboardSettingsCard({ saved }: { saved: ScoreboardSettings }) {
               aria-label="Pratinjau scoreboard"
               style={{ containerType: "size", width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT }}
             >
-              <Scoreboard state={SAMPLE} settings={current} />
+              <Scoreboard state={SAMPLE} settings={current.flags} session={parsedSession ?? savedSession} />
             </div>
           </div>
         </div>
@@ -154,7 +247,7 @@ function ScoreboardSettingsCard({ saved }: { saved: ScoreboardSettings }) {
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-panel-line pt-4">
-        <Button tone="accent" disabled={!dirty || saving} onClick={() => void save()}>
+        <Button tone="accent" disabled={!dirty || !parsedSession || saving} onClick={() => void save()}>
           Simpan
         </Button>
         {dirty && (
@@ -169,7 +262,7 @@ function ScoreboardSettingsCard({ saved }: { saved: ScoreboardSettings }) {
 
       <p className="mt-4 text-xs text-panel-muted">
         Di LIVE Studio, lebar kartu selalu sama dengan lebar kotak sumber, dan tingginya mengikuti isi. Tarik tepi bawah kotak ke atas
-        sampai tidak ada ruang kosong. Sisakan sedikit tinggi kalau chip rekor aktif, karena kartu bertambah tinggi saat chip muncul.
+        sampai tidak ada ruang kosong. Sisakan sedikit tinggi kalau chip rekor atau riwayat aktif, karena kartu bertambah tinggi saat isinya muncul.
       </p>
     </Card>
   );
@@ -190,7 +283,8 @@ export function PengaturanForm() {
 
   return (
     <div className="space-y-4">
-      <ScoreboardSettingsCard saved={settings.scoreboard} />
+      <ScoreboardSettingsCard saved={settings.scoreboard} savedSession={settings.session} />
+      <HotkeyCard saved={settings.hotkeys} />
     </div>
   );
 }

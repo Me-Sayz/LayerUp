@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { formatDuration } from "@/games/ml/format";
 import {
+  DEFAULT_SESSION,
   defaultMLSettings,
   parseMLSettings,
   type MLSettings,
   type ScoreboardSettings,
+  type SessionSettings,
 } from "@/games/ml/settings";
 import { LABELS, ML_GAME_ID, RECORDED_IDS, type MLState, type RecordedId } from "@/games/ml/state";
 import { FIT_H, fitUnit, fitVar, onFontsReady, writeFit } from "@/lib/overlay-fit";
@@ -22,6 +25,11 @@ const TOP_GAP = 10;
 const MATCH_GAP = 8;
 const TOP_WIDTH = { win: 118, lose: 118, streak: 136 } as const;
 const MATCH_WIDTH = { kill: 84, death: 84, assist: 84, ratio: 114 } as const;
+const MARK_SIZE = 26;
+const MARK_GAP = 6;
+const GOAL_MIN = 260;
+const TIMER_MIN = 150;
+const EXTRA_GAP = 10;
 const u = (n: number) => `calc(var(--u) * ${n})`;
 const CUT = u(22);
 const CUT_SHAPE = `polygon(0 0, calc(100% - ${CUT}) 0, 100% ${CUT}, 100% 100%, ${CUT} 100%, 0 calc(100% - ${CUT}))`;
@@ -70,6 +78,106 @@ function Flame({ size }: { size: number }) {
   );
 }
 
+function subscribeClock(onChange: () => void): () => void {
+  const id = setInterval(onChange, 1000);
+  return () => clearInterval(id);
+}
+
+const clockSecond = () => Math.floor(Date.now() / 1000);
+
+function MatchTimer({ startedAt, lastDurationMs }: { startedAt: number; lastDurationMs: number }) {
+  const nowSecond = useSyncExternalStore(subscribeClock, clockSecond, () => 0);
+  const running = startedAt > 0;
+  const frozen = !running && lastDurationMs > 0;
+  const text = running
+    ? formatDuration(Math.max(0, nowSecond * 1000 - startedAt))
+    : frozen
+      ? formatDuration(lastDurationMs)
+      : "--:--";
+
+  return (
+    <div className="flex items-baseline justify-between" style={{ opacity: running || frozen ? 1 : 0.42 }}>
+      <i className="font-bold not-italic text-hud-muted" style={{ fontSize: u(19) }}>
+        {frozen ? "DURASI" : "MATCH"}
+      </i>
+      <b
+        className={`font-hud-num font-semibold ${frozen ? "text-hud-gold" : "text-hud-ice"}`}
+        style={{ fontSize: u(40), lineHeight: 1, fontVariantNumeric: "tabular-nums" }}
+      >
+        {text}
+      </b>
+    </div>
+  );
+}
+
+function HistoryStrip({ results, count }: { results: MLState["results"]; count: number }) {
+  const shown = results.slice(-count);
+  return (
+    <div className="flex" style={{ gap: u(MARK_GAP) }} aria-label="Riwayat match">
+      {Array.from({ length: count }, (_, index) => {
+        const mark = shown[index];
+        const win = mark === "W";
+        const color = win ? "#3ddc97" : "#ff5c6c";
+        return (
+          <span
+            key={index}
+            className="inline-flex items-center justify-center font-hud-num font-semibold"
+            style={{
+              width: u(MARK_SIZE),
+              height: u(MARK_SIZE),
+              fontSize: u(18),
+              borderRadius: u(5),
+              color: mark ? color : "transparent",
+              border: `${u(1.5)} solid ${mark ? color : "rgba(255, 255, 255, 0.16)"}`,
+              background: mark ? (win ? "rgba(61, 220, 151, 0.14)" : "rgba(255, 92, 108, 0.14)") : "transparent",
+            }}
+          >
+            {mark ?? "-"}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function GoalRow({
+  label,
+  value,
+  goal,
+  done,
+  tone,
+}: {
+  label: string;
+  value: number;
+  goal: number;
+  done: boolean;
+  tone: "good" | "limit";
+}) {
+  const color = done ? (tone === "good" ? "#f2c14e" : "#ff5c6c") : tone === "good" ? "#3ddc97" : "#8c93a1";
+  return (
+    <div>
+      <div className="flex items-baseline justify-between" style={{ fontSize: u(18) }}>
+        <i className="font-bold not-italic text-hud-muted">{label}</i>
+        <b className="font-hud-num font-semibold" style={{ color, fontSize: u(24) }}>
+          {done && tone === "good" ? "\u2713 " : ""}
+          {value}/{goal}
+        </b>
+      </div>
+      <div style={{ height: u(6), marginTop: u(3), borderRadius: u(3), background: "rgba(255, 255, 255, 0.12)", overflow: "hidden" }}>
+        <span
+          className="block h-full"
+          style={{
+            width: `${Math.min(100, (value / goal) * 100)}%`,
+            borderRadius: u(3),
+            background: color,
+            transition: "width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function span(widths: number[], gap: number): number {
   if (widths.length === 0) return 0;
   return widths.reduce((sum, width) => sum + width, 0) + gap * (widths.length - 1);
@@ -88,7 +196,15 @@ function measureHeight(root: HTMLElement | null): void {
   }
 }
 
-export function Scoreboard({ state, settings }: { state: MLState; settings: ScoreboardSettings }) {
+export function Scoreboard({
+  state,
+  settings,
+  session: sessionSettings = DEFAULT_SESSION,
+}: {
+  state: MLState;
+  settings: ScoreboardSettings;
+  session?: SessionSettings;
+}) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const attachRoot = useCallback((element: HTMLDivElement | null) => {
@@ -116,12 +232,16 @@ export function Scoreboard({ state, settings }: { state: MLState; settings: Scor
   const topKeys = (["win", "lose", "streak"] as const).filter((key) => settings[key]);
   const matchKeys = (["kill", "death", "assist"] as const).filter((key) => settings[key]);
   const matchCount = matchKeys.length + (settings.ratio ? 1 : 0);
+  const goalKeys = (["goalWin", "goalStreak", "goalLose"] as const).filter((key) => settings[key]);
+  const extras = settings.history || settings.timer || goalKeys.length > 0;
   const visible = [
     settings.title || settings.hero,
     topKeys.length > 0,
     matchCount > 0,
     settings.winrate || chips.length > 0,
+    extras,
   ];
+  const { goals, historyCount } = sessionSettings;
   const first = visible.indexOf(true);
   if (first === -1) return null;
   const gapAt = (index: number, size: number) => u(index === first ? 0 : size);
@@ -137,6 +257,9 @@ export function Scoreboard({ state, settings }: { state: MLState; settings: Scor
       MATCH_GAP,
     ),
     settings.winrate ? WINRATE_MIN : 0,
+    settings.history ? span(Array<number>(historyCount).fill(MARK_SIZE), MARK_GAP) : 0,
+    goalKeys.length > 0 ? GOAL_MIN : 0,
+    settings.timer ? TIMER_MIN : 0,
   );
 
   const width = innerWidth + FRAME;
@@ -319,6 +442,38 @@ export function Scoreboard({ state, settings }: { state: MLState; settings: Scor
                 )}
               </div>
               )}
+
+              {visible[4] && (
+                <div
+                  className="flex flex-col"
+                  style={{
+                    gap: u(EXTRA_GAP),
+                    marginTop: gapAt(4, 14),
+                    paddingTop: first === 4 ? 0 : u(12),
+                    borderTop: first === 4 ? "none" : `${u(1)} solid rgba(255, 255, 255, 0.13)`,
+                  }}
+                >
+                  {settings.history && <HistoryStrip results={state.results} count={historyCount} />}
+                  {settings.goalWin && (
+                    <GoalRow label="TARGET MENANG" value={session.wins} goal={goals.win} done={session.wins >= goals.win} tone="good" />
+                  )}
+                  {settings.goalStreak && (
+                    <GoalRow
+                      label="TARGET STREAK"
+                      value={session.best >= goals.streak ? goals.streak : session.streak}
+                      goal={goals.streak}
+                      done={session.best >= goals.streak}
+                      tone="good"
+                    />
+                  )}
+                  {settings.goalLose && (
+                    <GoalRow label="BATAS KALAH" value={session.losses} goal={goals.lose} done={session.losses >= goals.lose} tone="limit" />
+                  )}
+                  {settings.timer && (
+                    <MatchTimer startedAt={state.matchStartedAt} lastDurationMs={state.lastDurationMs} />
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -332,5 +487,5 @@ export function MLScoreboard() {
   const stored = useGameSettings<MLSettings>(ML_GAME_ID);
   if (!state) return null;
   const settings = parseMLSettings(stored) ?? defaultMLSettings();
-  return <Scoreboard state={state} settings={settings.scoreboard} />;
+  return <Scoreboard state={state} settings={settings.scoreboard} session={settings.session} />;
 }

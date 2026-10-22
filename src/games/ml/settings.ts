@@ -1,4 +1,5 @@
 import type { GameSettingsDefinition } from "@/lib/types";
+import { DEFAULT_HOTKEYS, parseHotkeys, type HotkeySettings } from "./hotkeys";
 
 export const SCOREBOARD_KEYS = [
   "title",
@@ -12,12 +13,26 @@ export const SCOREBOARD_KEYS = [
   "ratio",
   "winrate",
   "records",
+  "history",
+  "timer",
+  "goalWin",
+  "goalStreak",
+  "goalLose",
 ] as const;
 export type ScoreboardKey = (typeof SCOREBOARD_KEYS)[number];
 export type ScoreboardSettings = Record<ScoreboardKey, boolean>;
 
+export const SESSION_LIMITS = { goalMin: 1, goalMax: 99, historyMin: 3, historyMax: 10 } as const;
+
+export interface SessionSettings {
+  goals: { win: number; streak: number; lose: number };
+  historyCount: number;
+}
+
 export interface MLSettings {
   scoreboard: ScoreboardSettings;
+  session: SessionSettings;
+  hotkeys: HotkeySettings;
 }
 
 export const SCOREBOARD_LABELS: Record<ScoreboardKey, string> = {
@@ -32,47 +47,66 @@ export const SCOREBOARD_LABELS: Record<ScoreboardKey, string> = {
   ratio: "Rasio KDA",
   winrate: "Bar win rate (WR)",
   records: "Chip rekor (First Blood, dll)",
+  history: "Riwayat match (W/L)",
+  timer: "Timer match",
+  goalWin: "Target menang",
+  goalStreak: "Target streak",
+  goalLose: "Batas kalah",
 };
 
+const DEFAULT_ON: readonly ScoreboardKey[] = SCOREBOARD_KEYS.slice(0, 11);
+
 function only(on: readonly ScoreboardKey[]): ScoreboardSettings {
-  const has = (key: ScoreboardKey) => on.includes(key);
-  return {
-    title: has("title"),
-    hero: has("hero"),
-    win: has("win"),
-    lose: has("lose"),
-    streak: has("streak"),
-    kill: has("kill"),
-    death: has("death"),
-    assist: has("assist"),
-    ratio: has("ratio"),
-    winrate: has("winrate"),
-    records: has("records"),
-  };
+  const result = {} as ScoreboardSettings;
+  for (const key of SCOREBOARD_KEYS) result[key] = on.includes(key);
+  return result;
 }
 
 // PRESET: tambahkan preset baru di array ini
 export const SCOREBOARD_PRESETS: readonly { id: string; label: string; values: ScoreboardSettings }[] = [
-  { id: "lengkap", label: "Lengkap", values: only(SCOREBOARD_KEYS) },
+  { id: "standar", label: "Standar", values: only(DEFAULT_ON) },
+  { id: "inti", label: "Inti live", values: only(["win", "lose", "streak", "winrate", "history"]) },
   { id: "winlose", label: "Win/Lose saja", values: only(["win", "lose"]) },
   { id: "kda", label: "KDA saja", values: only(["kill", "death", "assist", "ratio"]) },
+  { id: "lengkap", label: "Lengkap", values: only(SCOREBOARD_KEYS) },
 ];
 // END PRESET
 
+export const DEFAULT_SESSION: SessionSettings = {
+  goals: { win: 5, streak: 3, lose: 3 },
+  historyCount: 5,
+};
+
 export function defaultMLSettings(): MLSettings {
-  return { scoreboard: only(SCOREBOARD_KEYS) };
+  return {
+    scoreboard: only(DEFAULT_ON),
+    session: { goals: { ...DEFAULT_SESSION.goals }, historyCount: DEFAULT_SESSION.historyCount },
+    hotkeys: { ...DEFAULT_HOTKEYS },
+  };
 }
 
 export function sameScoreboard(a: ScoreboardSettings, b: ScoreboardSettings): boolean {
   return SCOREBOARD_KEYS.every((key) => a[key] === b[key]);
 }
 
+export function sameSession(a: SessionSettings, b: SessionSettings): boolean {
+  return (
+    a.historyCount === b.historyCount &&
+    a.goals.win === b.goals.win &&
+    a.goals.streak === b.goals.streak &&
+    a.goals.lose === b.goals.lose
+  );
+}
+
+function isPlain(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function parseScoreboard(value: unknown): ScoreboardSettings | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const input = value as Record<string, unknown>;
-  const result = only(SCOREBOARD_KEYS);
+  if (!isPlain(value)) return null;
+  const result = only(DEFAULT_ON);
   for (const key of SCOREBOARD_KEYS) {
-    const item = input[key];
+    const item = value[key];
     if (item === undefined) continue;
     if (typeof item !== "boolean") return null;
     result[key] = item;
@@ -80,10 +114,37 @@ function parseScoreboard(value: unknown): ScoreboardSettings | null {
   return result;
 }
 
+function inRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+}
+
+export function parseSession(value: unknown): SessionSettings | null {
+  if (value === undefined) return defaultMLSettings().session;
+  if (!isPlain(value)) return null;
+  const result = defaultMLSettings().session;
+
+  if (value.historyCount !== undefined) {
+    if (!inRange(value.historyCount, SESSION_LIMITS.historyMin, SESSION_LIMITS.historyMax)) return null;
+    result.historyCount = value.historyCount;
+  }
+  if (value.goals !== undefined) {
+    if (!isPlain(value.goals)) return null;
+    for (const key of ["win", "streak", "lose"] as const) {
+      const item = value.goals[key];
+      if (item === undefined) continue;
+      if (!inRange(item, SESSION_LIMITS.goalMin, SESSION_LIMITS.goalMax)) return null;
+      result.goals[key] = item;
+    }
+  }
+  return result;
+}
+
 export function parseMLSettings(value: unknown): MLSettings | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const scoreboard = parseScoreboard((value as { scoreboard?: unknown }).scoreboard);
-  return scoreboard ? { scoreboard } : null;
+  if (!isPlain(value)) return null;
+  const scoreboard = parseScoreboard(value.scoreboard);
+  const session = parseSession(value.session);
+  const hotkeys = parseHotkeys(value.hotkeys);
+  return scoreboard && session && hotkeys ? { scoreboard, session, hotkeys } : null;
 }
 
 export const mlSettings: GameSettingsDefinition<MLSettings> = {

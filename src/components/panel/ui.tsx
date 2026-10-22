@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 
-export type Tone = "neutral" | "accent" | "ok" | "bad" | "armed";
+export type Tone = "neutral" | "accent" | "ok" | "bad" | "armed" | "hint";
 export type Size = "sm" | "md" | "lg";
 
 const TONES: Record<Tone, string> = {
@@ -9,6 +9,7 @@ const TONES: Record<Tone, string> = {
   ok: "border-panel-ok/40 bg-panel-ok/15 text-panel-ok hover:bg-panel-ok/25",
   bad: "border-panel-bad/40 bg-panel-bad/15 text-panel-bad hover:bg-panel-bad/25",
   armed: "border-panel-bad bg-panel-bad text-white hover:opacity-90",
+  hint: "border-panel-accent/60 bg-panel-accent/10 text-panel-accent hover:bg-panel-accent/20",
 };
 
 const SIZES: Record<Size, string> = {

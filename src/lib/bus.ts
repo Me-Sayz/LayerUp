@@ -8,6 +8,7 @@ import {
   type GameId,
   type ScheduledEvent,
   type StreamMessage,
+  type WorkerStatus,
 } from "./types";
 
 type Listener = (message: StreamMessage) => void;
@@ -26,11 +27,18 @@ interface Bus {
   saveTimer: ReturnType<typeof setTimeout> | null;
   history: Map<GameId, unknown[]>;
   timers: Map<string, ReturnType<typeof setTimeout>>;
+  workerTimers: Map<GameId, ReturnType<typeof setTimeout>>;
+}
+
+export interface WorkerReport {
+  online: boolean;
+  hotkeys?: Record<string, string>;
 }
 
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
 const SAVE_DELAY_MS = 300;
 const HISTORY_LIMIT = 20;
+const WORKER_TIMEOUT_MS = 8000;
 
 function isAppState(value: unknown): value is AppState {
   if (typeof value !== "object" || value === null) return false;
@@ -47,6 +55,14 @@ function normalizeSettings(stored: Record<GameId, unknown> | undefined): Record<
   return result;
 }
 
+function normalizeGames(stored: Record<GameId, unknown>): Record<GameId, unknown> {
+  const result = { ...stored };
+  for (const game of listGames()) {
+    if (game.normalize && game.id in result) result[game.id] = game.normalize(result[game.id]);
+  }
+  return result;
+}
+
 function loadInitialState(): AppState {
   let base: AppState = { games: {} };
   try {
@@ -55,7 +71,7 @@ function loadInitialState(): AppState {
   } catch {
     // file belum ada atau rusak: mulai dari kosong
   }
-  return { ...base, settings: normalizeSettings(base.settings) };
+  return { games: normalizeGames(base.games), settings: normalizeSettings(base.settings) };
 }
 
 const holder = globalThis as typeof globalThis & { __overlayBus?: Bus };
@@ -65,6 +81,7 @@ function getBus(): Bus {
   if (existing) {
     existing.history ??= new Map();
     existing.timers ??= new Map();
+    existing.workerTimers ??= new Map();
     return existing;
   }
   const bus: Bus = {
@@ -73,6 +90,7 @@ function getBus(): Bus {
     saveTimer: null,
     history: new Map(),
     timers: new Map(),
+    workerTimers: new Map(),
   };
   holder.__overlayBus = bus;
   return bus;
@@ -107,7 +125,7 @@ function publish(bus: Bus, message: StreamMessage): void {
 async function writeState(state: AppState): Promise<void> {
   const tmp = `${STATE_FILE}.tmp`;
   await fs.mkdir(path.dirname(STATE_FILE), { recursive: true });
-  await fs.writeFile(tmp, JSON.stringify(state));
+  await fs.writeFile(tmp, JSON.stringify({ ...state, worker: undefined }));
   await fs.rename(tmp, STATE_FILE);
 }
 
@@ -159,16 +177,59 @@ export function updateSettings(gameId: GameId, value: unknown): DispatchResult {
   if (!game.settings) {
     return { ok: false, status: 404, error: `Game ${gameId} tidak punya pengaturan` };
   }
-  const parsed = game.settings.parse(value);
+  const bus = getBus();
+  ensureGames(bus);
+  const current = bus.state.settings?.[gameId];
+  const isPlain = (item: unknown): item is Record<string, unknown> =>
+    typeof item === "object" && item !== null && !Array.isArray(item);
+  const merged = isPlain(value) && isPlain(current) ? { ...current, ...value } : value;
+  const parsed = game.settings.parse(merged);
   if (parsed === null) {
     return { ok: false, status: 400, error: "Pengaturan tidak valid" };
   }
 
-  const bus = getBus();
-  ensureGames(bus);
   bus.state = { ...bus.state, settings: { ...bus.state.settings, [gameId]: parsed } };
   scheduleSave(bus);
   publish(bus, { kind: "state", state: bus.state });
+  return { ok: true };
+}
+
+function sameWorker(a: WorkerStatus | undefined, b: WorkerStatus): boolean {
+  if (!a || a.online !== b.online) return false;
+  const keys = new Set([...Object.keys(a.hotkeys), ...Object.keys(b.hotkeys)]);
+  return [...keys].every((key) => a.hotkeys[key] === b.hotkeys[key]);
+}
+
+function setWorkerStatus(bus: Bus, gameId: GameId, next: WorkerStatus): void {
+  if (sameWorker(bus.state.worker?.[gameId], next)) return;
+  bus.state = { ...bus.state, worker: { ...bus.state.worker, [gameId]: next } };
+  publish(bus, { kind: "state", state: bus.state });
+}
+
+export function reportWorker(gameId: GameId, report: WorkerReport): DispatchResult {
+  if (!getGame(gameId)) {
+    return { ok: false, status: 404, error: `Game tidak dikenal: ${gameId}` };
+  }
+  const bus = getBus();
+  ensureGames(bus);
+
+  const existing = bus.workerTimers.get(gameId);
+  if (existing) clearTimeout(existing);
+  bus.workerTimers.delete(gameId);
+
+  if (!report.online) {
+    setWorkerStatus(bus, gameId, { online: false, hotkeys: {} });
+    return { ok: true };
+  }
+
+  setWorkerStatus(bus, gameId, { online: true, hotkeys: report.hotkeys ?? {} });
+  bus.workerTimers.set(
+    gameId,
+    setTimeout(() => {
+      bus.workerTimers.delete(gameId);
+      setWorkerStatus(bus, gameId, { online: false, hotkeys: {} });
+    }, WORKER_TIMEOUT_MS),
+  );
   return { ok: true };
 }
 

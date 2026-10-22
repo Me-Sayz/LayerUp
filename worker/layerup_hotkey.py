@@ -75,9 +75,12 @@ def send_event(action):
         return "server tidak terjangkau"
 
 
-def send_heartbeat(bindings):
+def send_heartbeat(bindings, offline=False):
+    body = {"game": GAME, "hotkeys": bindings}
+    if offline:
+        body["offline"] = True
     try:
-        http_json("POST", "/api/worker", {"game": GAME, "hotkeys": bindings}, timeout=2)
+        http_json("POST", "/api/worker", body, timeout=2)
     except (urllib.error.URLError, OSError, ValueError):
         pass
 
@@ -161,6 +164,7 @@ def main():
             w.tick()
     except KeyboardInterrupt:
         keyboard.unhook_all()
+        send_heartbeat({}, offline=True)
         log("Berhenti.")
     return 0
 

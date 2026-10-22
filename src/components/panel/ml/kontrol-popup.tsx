@@ -3,9 +3,14 @@
 import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { Button } from "@/components/panel/ui";
+import { HOTKEY_ACTIONS, HOTKEY_LABELS, formatCombo } from "@/games/ml/hotkeys";
+import { defaultMLSettings, parseMLSettings, type MLSettings } from "@/games/ml/settings";
 import { LIMITS, ML_GAME_ID, type MLState } from "@/games/ml/state";
+import { HasilButtons } from "@/components/panel/ml/kontrol-hasil";
+import { useMatchTime } from "@/components/panel/ml/use-match-time";
+import { useLastResultText } from "@/components/panel/ml/use-result-status";
 import { sendEvent } from "@/lib/send-event";
-import { useGameState } from "@/lib/use-game-state";
+import { useGameSettings, useGameState, useWorkerStatus } from "@/lib/use-game-state";
 
 const STORAGE_KEY = "layerup.popup.ml";
 const WIDTH = 288;
@@ -13,22 +18,6 @@ const MARGIN = 8;
 const HEADER_MIN = 48;
 const ERROR_MS = 4000;
 const ARM_MS = 3000;
-
-const HOTKEY_ACTIONS = [
-  "Tambah Kill",
-  "Tambah Death",
-  "Tambah Assist",
-  "First Blood",
-  "Double Kill",
-  "Triple Kill",
-  "Maniac",
-  "Savage",
-  "MVP",
-  "Victory",
-  "Defeat",
-  "Undo",
-  "Match baru",
-];
 
 interface Position {
   x: number;
@@ -89,6 +78,12 @@ export function KontrolPopup({ onClose }: { onClose: () => void }) {
 
 function PopupBody({ onClose }: { onClose: () => void }) {
   const state = useGameState<MLState>(ML_GAME_ID);
+  const rawSettings = useGameSettings<MLSettings>(ML_GAME_ID);
+  const hotkeys = (parseMLSettings(rawSettings) ?? defaultMLSettings()).hotkeys;
+  const worker = useWorkerStatus(ML_GAME_ID);
+  const matchTime = useMatchTime(state);
+  const lastResult = useLastResultText(state);
+  const needsStart = state !== null && state.phase === "playing" && state.matchStartedAt === 0;
   const [raw, setRaw] = useState<Position>(() => loadPosition() ?? defaultPosition());
   const [error, setError] = useState<string | null>(null);
   const [armed, setArmed] = useState(false);
@@ -191,16 +186,11 @@ function PopupBody({ onClose }: { onClose: () => void }) {
       <div className="space-y-3 p-3">
         <p className="rounded-md bg-panel px-3 py-2 font-mono text-xs text-panel-muted" aria-live="polite">
           {statusLine(state)}
+          {matchTime ? ` · ${matchTime}` : ""}
+          {lastResult && <span className="mt-0.5 block text-[11px]">Terakhir: {lastResult}</span>}
         </p>
 
-        <div className="grid grid-cols-2 gap-2">
-          <Button size="lg" tone="ok" onClick={() => void run("victory")}>
-            Victory
-          </Button>
-          <Button size="lg" tone="bad" onClick={() => void run("defeat")}>
-            Defeat
-          </Button>
-        </div>
+        <HasilButtons state={state} run={run} />
 
         <div className="grid">
           <Button onClick={() => void run("undo")}>Undo</Button>
@@ -228,7 +218,13 @@ function PopupBody({ onClose }: { onClose: () => void }) {
         </form>
 
         <div className="grid grid-cols-2 gap-2">
-          <Button onClick={() => void run("match_new")}>Match baru</Button>
+          <Button
+            tone={needsStart ? "hint" : "neutral"}
+            title="Tekan saat game dimulai supaya timer match jalan"
+            onClick={() => void run("match_new")}
+          >
+            Match baru
+          </Button>
           <Button tone={armed ? "armed" : "neutral"} onClick={resetSession}>
             {armed ? "Yakin? Klik lagi" : "Reset sesi"}
           </Button>
@@ -242,13 +238,15 @@ function PopupBody({ onClose }: { onClose: () => void }) {
 
         <details className="group rounded-md border border-panel-line">
           <summary className="cursor-pointer select-none px-3 py-2 text-xs text-panel-muted hover:text-panel-text">
-            Hotkey (belum diatur)
+            {worker?.online ? "Hotkey (worker aktif)" : "Hotkey (worker tidak aktif)"}
           </summary>
           <ul className="space-y-1 border-t border-panel-line px-3 py-2 text-xs">
             {HOTKEY_ACTIONS.map((action) => (
               <li key={action} className="flex items-center justify-between">
-                <span className="text-panel-text">{action}</span>
-                <kbd className="rounded border border-panel-line px-1.5 py-0.5 font-mono text-[11px] text-panel-muted">-</kbd>
+                <span className="text-panel-text">{HOTKEY_LABELS[action]}</span>
+                <kbd className="rounded border border-panel-line px-1.5 py-0.5 font-mono text-[11px] text-panel-muted">
+                  {formatCombo(hotkeys[action])}
+                </kbd>
               </li>
             ))}
           </ul>

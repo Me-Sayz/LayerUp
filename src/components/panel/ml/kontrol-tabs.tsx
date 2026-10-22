@@ -15,6 +15,8 @@ import {
   type KdaEvent,
   type MLState,
 } from "@/games/ml/state";
+import { HasilButtons } from "@/components/panel/ml/kontrol-hasil";
+import { useLastResultText } from "@/components/panel/ml/use-result-status";
 import { sendEvent } from "@/lib/send-event";
 import { useGameState } from "@/lib/use-game-state";
 
@@ -22,13 +24,18 @@ const ERROR_MS = 4000;
 const ARM_MS = 3000;
 
 const TABS = [
+  { id: "sesi", label: "Sesi" },
   { id: "match", label: "Match" },
   { id: "announcer", label: "Announcer" },
-  { id: "sesi", label: "Sesi" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
 const KDA_LABELS: Record<KdaEvent, string> = { kill: "Kill", death: "Death", assist: "Assist" };
+
+const ADJUST_FIELDS = [
+  { field: "wins", label: "Menang" },
+  { field: "losses", label: "Kalah" },
+] as const;
 
 type Run = (type: string, payload?: Record<string, unknown>) => Promise<boolean>;
 
@@ -163,6 +170,8 @@ function SesiTab({ state, run }: TabProps) {
   const rate = total > 0 ? `${Math.round((wins / total) * 100)}%` : "-";
   const [armed, setArmed] = useState(false);
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastResult = useLastResultText(state);
+  const needsStart = state.phase === "playing" && state.matchStartedAt === 0;
 
   useEffect(
     () => () => {
@@ -196,23 +205,52 @@ function SesiTab({ state, run }: TabProps) {
 
       <Card
         title="Hasil match"
-        description={`Hasil kedua dalam ${TIMING.resultGuardMs / 1000} detik diabaikan supaya tidak terhitung dobel. K/D/A direset otomatis ${TIMING.resetDelayMs / 1000} detik setelah hasil.`}
+        description={`Hasil kedua dalam ${TIMING.resultGuardMs / 1000} detik diabaikan supaya tidak terhitung dobel. K/D/A direset otomatis ${TIMING.resetDelayMs / 1000} detik setelah hasil. Tekan Match baru saat game dimulai supaya timer match jalan.`}
       >
-        <div className="grid grid-cols-2 gap-2">
-          <Button size="lg" tone="ok" onClick={() => void run("victory")}>
-            Victory
-          </Button>
-          <Button size="lg" tone="bad" onClick={() => void run("defeat")}>
-            Defeat
-          </Button>
-        </div>
+        <p className="mb-3 text-xs text-panel-muted" aria-live="polite">
+          {lastResult ? `Hasil terakhir: ${lastResult}` : "Belum ada hasil di sesi ini."}
+        </p>
+        <HasilButtons state={state} run={run} />
         <div className="mt-2 grid grid-cols-2 gap-2">
           <Button onClick={() => void run("undo")}>Undo</Button>
-          <Button onClick={() => void run("match_new")}>Match baru</Button>
+          <Button tone={needsStart ? "hint" : "neutral"} onClick={() => void run("match_new")}>
+            Match baru
+          </Button>
         </div>
+        {needsStart && <p className="mt-2 text-xs text-panel-muted">Tekan Match baru saat game mulai supaya timer jalan.</p>}
       </Card>
 
-      <Card title="Reset sesi" description="Menghapus menang, kalah, streak, dan hitungan banner. Nama hero tetap.">
+      <Card
+        title="Koreksi hasil"
+        description="Untuk salah tekan yang sudah lewat batas Undo, atau match yang dimainkan tanpa live. Hanya mengubah angka menang dan kalah; streak dan riwayat W/L tidak ikut berubah."
+      >
+        <ul className="divide-y divide-panel-line">
+          {ADJUST_FIELDS.map(({ field, label }) => {
+            const value = state.session[field];
+            return (
+              <li key={field} className="flex items-center justify-between py-2">
+                <span className="text-sm">{label}</span>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" aria-label={`Kurangi ${label}`} disabled={value === 0} onClick={() => void run("session_adjust", { field, delta: -1 })}>
+                    -
+                  </Button>
+                  <span className="w-10 text-center font-mono text-xl tabular-nums" aria-live="polite">
+                    {value}
+                  </span>
+                  <Button size="sm" aria-label={`Tambah ${label}`} onClick={() => void run("session_adjust", { field, delta: 1 })}>
+                    +
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+
+      <Card
+        title="Reset sesi"
+        description="Menyimpan sesi ini ke Riwayat sesi, lalu mengosongkan menang, kalah, streak, dan hitungan banner. Nama hero tetap."
+      >
         <Button tone={armed ? "armed" : "neutral"} onClick={resetSession}>
           {armed ? "Yakin? Klik lagi" : "Reset sesi"}
         </Button>
@@ -224,7 +262,7 @@ function SesiTab({ state, run }: TabProps) {
 // TAB BAR
 export function KontrolTabs() {
   const state = useGameState<MLState>(ML_GAME_ID);
-  const [tab, setTab] = useState<TabId>("match");
+  const [tab, setTab] = useState<TabId>("sesi");
   const [error, setError] = useState<string | null>(null);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 

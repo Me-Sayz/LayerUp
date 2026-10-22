@@ -3,9 +3,13 @@ import {
   ANNOUNCE_EFFECT,
   KDA_FIELD,
   LIMITS,
+  RESULT_HISTORY_MAX,
+  SESSION_ARCHIVE_MAX,
+  SESSION_COUNT_MAX,
   ML_GAME_ID,
   TIMING,
   initialMLState,
+  normalizeMLState,
   isAnnounceId,
   isKdaEvent,
   isRecordedId,
@@ -15,6 +19,7 @@ import {
   type KdaEvent,
   type MLState,
   type ResultId,
+  type SessionRecord,
 } from "./state";
 import { mlSettings } from "./settings";
 
@@ -40,6 +45,79 @@ function readDelta(payload: Payload): number | null {
 function readText(value: unknown, max: number): string | null {
   if (typeof value !== "string") return null;
   return value.trim().slice(0, max);
+}
+
+function readId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const id = value.trim();
+  return id.length > 0 && id.length <= 40 ? id : null;
+}
+
+function archiveCurrent(state: MLState, at: number): SessionRecord | null {
+  const { wins, losses, streak, best } = state.session;
+  if (wins + losses === 0) return null;
+  const endedAt = state.lastResultAt > 0 ? state.lastResultAt : at;
+  let id = endedAt.toString(36);
+  while (state.sessions.some((record) => record.id === id)) id += "x";
+  return {
+    id,
+    startedAt: state.sessionStartedAt > 0 ? state.sessionStartedAt : endedAt,
+    endedAt,
+    wins,
+    losses,
+    streak,
+    best,
+    results: state.results,
+  };
+}
+
+function withArchive(sessions: SessionRecord[], record: SessionRecord | null): SessionRecord[] {
+  return (record ? [record, ...sessions] : sessions).slice(0, SESSION_ARCHIVE_MAX);
+}
+
+function reduceSessionReset(state: MLState, at: number): Result {
+  const sessions = withArchive(state.sessions, archiveCurrent(state, at));
+  return { state: { ...initialMLState(), hero: state.hero, sessions } };
+}
+
+function reduceSessionResume(state: MLState, payload: Payload, at: number): Result {
+  const id = readId(payload?.id);
+  const record = id === null ? undefined : state.sessions.find((item) => item.id === id);
+  if (!record) return ignore(state);
+  const rest = state.sessions.filter((item) => item.id !== record.id);
+  const sessions = withArchive(rest, archiveCurrent({ ...state, sessions: rest }, at));
+  return {
+    state: {
+      ...state,
+      phase: "playing",
+      match: { k: 0, d: 0, a: 0 },
+      session: { wins: record.wins, losses: record.losses, streak: record.streak, best: record.best },
+      results: record.results,
+      sessionStartedAt: record.startedAt,
+      lastResultAt: record.endedAt,
+      matchStartedAt: 0,
+      lastDurationMs: 0,
+      sessions,
+    },
+  };
+}
+
+function reduceSessionDelete(state: MLState, payload: Payload): Result {
+  const id = readId(payload?.id);
+  if (id === null || !state.sessions.some((item) => item.id === id)) return ignore(state);
+  return { state: { ...state, sessions: state.sessions.filter((item) => item.id !== id) } };
+}
+
+function reduceSessionAdjust(state: MLState, payload: Payload, at: number): Result {
+  const field = payload?.field;
+  if (field !== "wins" && field !== "losses") return ignore(state);
+  const delta = readDelta(payload);
+  if (delta === null) return ignore(state);
+  const next = Math.min(SESSION_COUNT_MAX, Math.max(0, state.session[field] + delta));
+  if (next === state.session[field]) return ignore(state);
+  const session = { ...state.session, [field]: next };
+  const started = state.sessionStartedAt > 0 ? state.sessionStartedAt : at;
+  return { state: { ...state, session, sessionStartedAt: session.wins + session.losses > 0 ? started : 0 } };
 }
 
 function reduceKda(state: MLState, type: KdaEvent, payload: Payload): Result {
@@ -72,8 +150,20 @@ function reduceResult(state: MLState, id: ResultId, at: number): Result {
     best: Math.max(state.session.best, streak),
   };
 
+  const results = [...state.results, won ? "W" : "L"].slice(-RESULT_HISTORY_MAX) as MLState["results"];
+  const lastDurationMs = state.matchStartedAt > 0 ? Math.max(0, at - state.matchStartedAt) : 0;
+
   return {
-    state: { ...state, phase: "ended", session, lastResultAt: at },
+    state: {
+      ...state,
+      phase: "ended",
+      session,
+      lastResultAt: at,
+      results,
+      matchStartedAt: 0,
+      lastDurationMs,
+      sessionStartedAt: state.sessionStartedAt > 0 ? state.sessionStartedAt : at,
+    },
     effects: [announce({ id })],
     schedule: [
       {
@@ -106,10 +196,12 @@ function reduce(state: MLState, event: GameEvent): Result {
       return { state, effects: [announce({ id: "custom", text })] };
     }
     case "match_new": {
-      if (payload?.onlyIfEnded === true && state.phase !== "ended") return ignore(state);
-      const { k, d, a } = state.match;
-      if (state.phase === "playing" && k === 0 && d === 0 && a === 0) return ignore(state);
-      return { state: { ...state, phase: "playing", match: { k: 0, d: 0, a: 0 } } };
+      const fresh = { phase: "playing" as const, match: { k: 0, d: 0, a: 0 }, lastDurationMs: 0 };
+      if (payload?.onlyIfEnded === true) {
+        if (state.phase !== "ended") return ignore(state);
+        return { state: { ...state, ...fresh, matchStartedAt: 0 } };
+      }
+      return { state: { ...state, ...fresh, matchStartedAt: event.at ?? Date.now() } };
     }
     case "hero": {
       const name = readText(payload?.name, LIMITS.heroName);
@@ -117,7 +209,13 @@ function reduce(state: MLState, event: GameEvent): Result {
       return { state: { ...state, hero: name } };
     }
     case "session_reset":
-      return { state: { ...initialMLState(), hero: state.hero } };
+      return reduceSessionReset(state, event.at ?? Date.now());
+    case "session_resume":
+      return reduceSessionResume(state, payload, event.at ?? Date.now());
+    case "session_delete":
+      return reduceSessionDelete(state, payload);
+    case "session_adjust":
+      return reduceSessionAdjust(state, payload, event.at ?? Date.now());
     default:
       return ignore(state);
   }
@@ -127,6 +225,7 @@ export const mlGame: GameDefinition<MLState> = {
   id: ML_GAME_ID,
   name: "Mobile Legends",
   initialState: initialMLState,
+  normalize: normalizeMLState,
   reduce,
   settings: mlSettings,
 };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import type { AppState, GameEffect, GameId, StreamMessage } from "@/lib/types";
+import type { AppState, GameEffect, GameId, StreamMessage, WorkerStatus } from "@/lib/types";
 
 const STREAM_URL = "/api/stream";
 const RETRY_MS = 2000;
@@ -125,6 +125,15 @@ export function useGameSettings<T>(game: GameId): T | null {
   );
   const value = state?.settings?.[game];
   return (value as T | undefined) ?? null;
+}
+
+export function useWorkerStatus(game: GameId): WorkerStatus | null {
+  const state = useSyncExternalStore(
+    subscribeSnapshot,
+    () => snapshot.state,
+    () => null,
+  );
+  return state?.worker?.[game] ?? null;
 }
 
 export function useGameEffects(game: GameId, handler: (effect: GameEffect) => void): void {

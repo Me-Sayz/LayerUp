@@ -39,13 +39,20 @@ export interface GameDefinition<S = unknown> {
   id: GameId;
   name: string;
   initialState(): S;
+  normalize?(raw: unknown): S;
   reduce(state: S, event: GameEvent): ReduceResult<S>;
   settings?: GameSettingsDefinition;
+}
+
+export interface WorkerStatus {
+  online: boolean;
+  hotkeys: Record<string, string>;
 }
 
 export interface AppState {
   games: Record<GameId, unknown>;
   settings?: Record<GameId, unknown>;
+  worker?: Record<GameId, WorkerStatus>;
 }
 
 export type StreamMessage =

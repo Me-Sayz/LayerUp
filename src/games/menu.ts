@@ -21,6 +21,7 @@ export const GAME_MENUS: GameMenu[] = [
     items: [
       { label: "Kontrol Live", href: "/ml/kontrol" },
       { label: "Overlay", href: "/ml/overlay" },
+      { label: "Riwayat sesi", href: "/ml/riwayat" },
       { label: "Pengaturan", href: "/ml/pengaturan" },
     ],
   },
