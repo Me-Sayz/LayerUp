@@ -101,7 +101,7 @@ export function RankDisplayCard({ saved }: { saved: RankSettings }) {
           <p className="pt-2 text-xs text-panel-muted">
             Gambar diambil dari folder <span className="font-mono text-panel-text">public/ranks/</span> dengan nama{" "}
             <span className="font-mono text-panel-text">warrior, elite, master, grandmaster, epic, legend, mythic, honor, glory, immortal, grading</span>{" "}
-            (.png). Kalau file belum ada, tampil lencana cadangan.
+            (.webp). Kalau file belum ada, tampil lencana cadangan.
           </p>
         </div>
 

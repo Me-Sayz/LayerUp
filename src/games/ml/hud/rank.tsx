@@ -60,7 +60,7 @@ function RankImage({ id, size }: { id: ImageId; size: number }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={`/ranks/${id}.png`}
+      src={`/ranks/${id}.webp`}
       alt=""
       onError={() => setFailed(id)}
       style={{ width: u(size), height: u(size), objectFit: "contain", filter: `drop-shadow(0 ${u(4)} ${u(8)} rgba(0, 0, 0, 0.45))` }}
