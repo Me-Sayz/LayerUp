@@ -29,10 +29,22 @@ export interface SessionSettings {
   historyCount: number;
 }
 
+export const RANK_KEYS = ["image", "name", "stars", "count"] as const;
+export type RankKey = (typeof RANK_KEYS)[number];
+export type RankSettings = Record<RankKey, boolean>;
+
+export const RANK_LABELS: Record<RankKey, string> = {
+  image: "Gambar rank",
+  name: "Nama rank dan angka Romawi",
+  stars: "Ikon bintang",
+  count: "Jumlah bintang (3/5, atau total di Mythic)",
+};
+
 export interface MLSettings {
   scoreboard: ScoreboardSettings;
   session: SessionSettings;
   hotkeys: HotkeySettings;
+  rank: RankSettings;
 }
 
 export const SCOREBOARD_LABELS: Record<ScoreboardKey, string> = {
@@ -77,11 +89,20 @@ export const DEFAULT_SESSION: SessionSettings = {
   historyCount: 5,
 };
 
+export function defaultRankSettings(): RankSettings {
+  return { image: true, name: true, stars: true, count: true };
+}
+
+export function sameRankSettings(a: RankSettings, b: RankSettings): boolean {
+  return RANK_KEYS.every((key) => a[key] === b[key]);
+}
+
 export function defaultMLSettings(): MLSettings {
   return {
     scoreboard: only(DEFAULT_ON),
     session: { goals: { ...DEFAULT_SESSION.goals }, historyCount: DEFAULT_SESSION.historyCount },
     hotkeys: { ...DEFAULT_HOTKEYS },
+    rank: defaultRankSettings(),
   };
 }
 
@@ -139,12 +160,26 @@ export function parseSession(value: unknown): SessionSettings | null {
   return result;
 }
 
+function parseRank(value: unknown): RankSettings | null {
+  if (value === undefined) return defaultRankSettings();
+  if (!isPlain(value)) return null;
+  const result = defaultRankSettings();
+  for (const key of RANK_KEYS) {
+    const item = value[key];
+    if (item === undefined) continue;
+    if (typeof item !== "boolean") return null;
+    result[key] = item;
+  }
+  return result;
+}
+
 export function parseMLSettings(value: unknown): MLSettings | null {
   if (!isPlain(value)) return null;
   const scoreboard = parseScoreboard(value.scoreboard);
   const session = parseSession(value.session);
   const hotkeys = parseHotkeys(value.hotkeys);
-  return scoreboard && session && hotkeys ? { scoreboard, session, hotkeys } : null;
+  const rank = parseRank(value.rank);
+  return scoreboard && session && hotkeys && rank ? { scoreboard, session, hotkeys, rank } : null;
 }
 
 export const mlSettings: GameSettingsDefinition<MLSettings> = {

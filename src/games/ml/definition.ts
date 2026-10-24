@@ -21,6 +21,7 @@ import {
   type ResultId,
   type SessionRecord,
 } from "./state";
+import { adjustStars, applyResult, parsePos, resolvePending, setPosition, startGrading, type RankState } from "./rank";
 import { mlSettings } from "./settings";
 
 type Result = ReduceResult<MLState>;
@@ -68,6 +69,8 @@ function archiveCurrent(state: MLState, at: number): SessionRecord | null {
     streak,
     best,
     results: state.results,
+    rankFrom: state.sessionRankFrom ?? state.rank.pos,
+    rankTo: state.rank.pos,
   };
 }
 
@@ -77,7 +80,7 @@ function withArchive(sessions: SessionRecord[], record: SessionRecord | null): S
 
 function reduceSessionReset(state: MLState, at: number): Result {
   const sessions = withArchive(state.sessions, archiveCurrent(state, at));
-  return { state: { ...initialMLState(), hero: state.hero, sessions } };
+  return { state: { ...initialMLState(), hero: state.hero, sessions, rank: state.rank } };
 }
 
 function reduceSessionResume(state: MLState, payload: Payload, at: number): Result {
@@ -94,6 +97,7 @@ function reduceSessionResume(state: MLState, payload: Payload, at: number): Resu
       session: { wins: record.wins, losses: record.losses, streak: record.streak, best: record.best },
       results: record.results,
       sessionStartedAt: record.startedAt,
+      sessionRankFrom: record.rankFrom,
       lastResultAt: record.endedAt,
       matchStartedAt: 0,
       lastDurationMs: 0,
@@ -117,7 +121,53 @@ function reduceSessionAdjust(state: MLState, payload: Payload, at: number): Resu
   if (next === state.session[field]) return ignore(state);
   const session = { ...state.session, [field]: next };
   const started = state.sessionStartedAt > 0 ? state.sessionStartedAt : at;
-  return { state: { ...state, session, sessionStartedAt: session.wins + session.losses > 0 ? started : 0 } };
+  const active = session.wins + session.losses > 0;
+  return {
+    state: {
+      ...state,
+      session,
+      sessionStartedAt: active ? started : 0,
+      sessionRankFrom: active ? (state.sessionRankFrom ?? state.rank.pos) : null,
+    },
+  };
+}
+
+function sameRank(a: RankState, b: RankState): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function withRank(state: MLState, rank: RankState, record = true): Result {
+  if (sameRank(state.rank, rank)) return ignore(state);
+  return { state: { ...state, rank }, record };
+}
+
+function reduceRankSet(state: MLState, payload: Payload): Result {
+  const pos = parsePos(payload);
+  if (!pos) return ignore(state);
+  return withRank(state, setPosition(state.rank, pos));
+}
+
+function reduceRankStars(state: MLState, payload: Payload): Result {
+  const delta = payload?.delta;
+  if (delta !== 1 && delta !== -1) return ignore(state);
+  return withRank(state, adjustStars(state.rank, delta));
+}
+
+function reduceRankGrade(state: MLState, payload: Payload): Result {
+  const mode = payload?.mode;
+  if (mode === "grading" || mode === "skip") return withRank(state, resolvePending(state.rank, mode));
+  if (mode === "start") return withRank(state, startGrading(state.rank));
+  if (mode === "cancel") {
+    if (!state.rank.grading) return ignore(state);
+    return withRank(state, { ...state.rank, grading: null });
+  }
+  return ignore(state);
+}
+
+function reduceRankAuto(state: MLState, payload: Payload): Result {
+  const value = payload?.value;
+  if (typeof value !== "boolean") return ignore(state);
+  return withRank(state, { ...state.rank, auto: value }, false);
 }
 
 function reduceKda(state: MLState, type: KdaEvent, payload: Payload): Result {
@@ -163,6 +213,8 @@ function reduceResult(state: MLState, id: ResultId, at: number): Result {
       matchStartedAt: 0,
       lastDurationMs,
       sessionStartedAt: state.sessionStartedAt > 0 ? state.sessionStartedAt : at,
+      sessionRankFrom: state.sessionStartedAt > 0 ? (state.sessionRankFrom ?? state.rank.pos) : state.rank.pos,
+      rank: applyResult(state.rank, won),
     },
     effects: [announce({ id })],
     schedule: [
@@ -216,6 +268,14 @@ function reduce(state: MLState, event: GameEvent): Result {
       return reduceSessionDelete(state, payload);
     case "session_adjust":
       return reduceSessionAdjust(state, payload, event.at ?? Date.now());
+    case "rank_set":
+      return reduceRankSet(state, payload);
+    case "rank_stars":
+      return reduceRankStars(state, payload);
+    case "rank_grade":
+      return reduceRankGrade(state, payload);
+    case "rank_auto":
+      return reduceRankAuto(state, payload);
     default:
       return ignore(state);
   }

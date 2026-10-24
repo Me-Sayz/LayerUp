@@ -54,6 +54,16 @@ const WIDGETS: Widget[] = [
     previewHeight: 150,
     canTest: true,
   },
+  {
+    id: "rank",
+    name: "Rank",
+    description: "Rank sekarang lengkap dengan bintang, atau slot grading 10 match.",
+    path: "/overlay/ml/hud/rank",
+    size: "bebas, rasio sekitar 3 banding 1 (contoh 480 x 168)",
+    anchor: "kiri atas",
+    previewWidth: 480,
+    previewHeight: 168,
+  },
 ];
 // END WIDGET
 

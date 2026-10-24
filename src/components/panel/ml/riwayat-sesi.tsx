@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Card, ErrorNote } from "@/components/panel/ui";
+import { posLabel, type RankPos } from "@/games/ml/rank";
 import { ML_GAME_ID, SESSION_ARCHIVE_MAX, type MLState, type ResultMark, type SessionRecord } from "@/games/ml/state";
 import { sendEvent } from "@/lib/send-event";
 import { useGameState } from "@/lib/use-game-state";
@@ -47,6 +48,13 @@ function Strip({ results }: { results: ResultMark[] }) {
 // END STRIP
 
 // SECTION: ITEM
+function rankText(from: RankPos | null, to: RankPos | null): string | null {
+  if (!from || !to) return null;
+  const a = posLabel(from);
+  const b = posLabel(to);
+  return a === b ? `Rank ${b}` : `Rank ${a} → ${b}`;
+}
+
 function Summary({
   wins,
   losses,
@@ -54,6 +62,7 @@ function Summary({
   results,
   title,
   hint,
+  rank,
 }: {
   wins: number;
   losses: number;
@@ -61,6 +70,7 @@ function Summary({
   results: ResultMark[];
   title: string;
   hint?: string;
+  rank?: string | null;
 }) {
   return (
     <div className="min-w-0 flex-1 space-y-1.5">
@@ -72,6 +82,7 @@ function Summary({
           · WR {winRate(wins, losses)} · streak terbaik {best}
         </span>
       </p>
+      {rank && <p className="text-xs text-panel-muted">{rank}</p>}
       <Strip results={results} />
       {hint && <p className="text-xs text-panel-muted">{hint}</p>}
     </div>
@@ -97,6 +108,7 @@ function Item({
         losses={record.losses}
         best={record.best}
         results={record.results}
+        rank={rankText(record.rankFrom, record.rankTo)}
       />
       <div className="flex gap-2">
         <Button size="sm" onClick={onResume}>
@@ -170,6 +182,7 @@ export function RiwayatSesi() {
             losses={losses}
             best={best}
             results={state.results}
+            rank={rankText(state.sessionRankFrom ?? state.rank.pos, state.rank.pos)}
           />
         ) : (
           <p className="text-sm text-panel-muted">Belum ada hasil di sesi ini.</p>

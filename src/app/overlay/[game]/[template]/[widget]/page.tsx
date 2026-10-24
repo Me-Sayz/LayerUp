@@ -2,12 +2,14 @@ import { notFound } from "next/navigation";
 import type { ReactElement } from "react";
 import { MLBanner } from "@/games/ml/hud/banner";
 import { MLKillfeed } from "@/games/ml/hud/killfeed";
+import { MLRank } from "@/games/ml/hud/rank";
 import { MLScoreboard } from "@/games/ml/hud/scoreboard";
 
 const WIDGETS: Record<string, ReactElement | undefined> = {
   "ml/hud/scoreboard": <MLScoreboard />,
   "ml/hud/killfeed": <MLKillfeed />,
   "ml/hud/banner": <MLBanner />,
+  "ml/hud/rank": <MLRank />,
 };
 
 export const instant = false;

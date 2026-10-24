@@ -16,6 +16,7 @@ import {
   type MLState,
 } from "@/games/ml/state";
 import { HasilButtons } from "@/components/panel/ml/kontrol-hasil";
+import { RankControl, RankPrompt } from "@/components/panel/ml/kontrol-rank";
 import { useLastResultText } from "@/components/panel/ml/use-result-status";
 import { sendEvent } from "@/lib/send-event";
 import { useGameState } from "@/lib/use-game-state";
@@ -220,6 +221,8 @@ function SesiTab({ state, run }: TabProps) {
         {needsStart && <p className="mt-2 text-xs text-panel-muted">Tekan Match baru saat game mulai supaya timer jalan.</p>}
       </Card>
 
+      <RankControl state={state} run={run} storageKey="tab" />
+
       <Card
         title="Koreksi hasil"
         description="Untuk salah tekan yang sudah lewat batas Undo, atau match yang dimainkan tanpa live. Hanya mengubah angka menang dan kalah; streak dan riwayat W/L tidak ikut berubah."
@@ -325,6 +328,12 @@ export function KontrolTabs() {
       {error && (
         <div className="mb-4">
           <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
+
+      {state && state.rank.pending && (
+        <div className="mb-4">
+          <RankPrompt state={state} run={run} />
         </div>
       )}
 

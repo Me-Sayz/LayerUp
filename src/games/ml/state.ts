@@ -1,3 +1,5 @@
+import { initialRank, normalizeRank, parsePos, type RankPos, type RankState } from "./rank";
+
 export const ML_GAME_ID = "ml";
 export const ANNOUNCE_EFFECT = "announce";
 
@@ -70,6 +72,8 @@ export interface SessionRecord {
   streak: number;
   best: number;
   results: ResultMark[];
+  rankFrom: RankPos | null;
+  rankTo: RankPos | null;
 }
 
 export const SESSION_ARCHIVE_MAX = 50;
@@ -87,6 +91,8 @@ export interface MLState {
   lastDurationMs: number;
   sessionStartedAt: number;
   sessions: SessionRecord[];
+  rank: RankState;
+  sessionRankFrom: RankPos | null;
 }
 
 export interface AnnouncePayload {
@@ -118,6 +124,8 @@ export function initialMLState(): MLState {
     lastDurationMs: 0,
     sessionStartedAt: 0,
     sessions: [],
+    rank: initialRank(),
+    sessionRankFrom: null,
   };
 }
 
@@ -150,6 +158,8 @@ function normalizeRecord(raw: unknown): SessionRecord | null {
     streak: count(input.streak),
     best: count(input.best),
     results: marks(input.results),
+    rankFrom: parsePos(input.rankFrom),
+    rankTo: parsePos(input.rankTo),
   };
 }
 
@@ -181,6 +191,8 @@ export function normalizeMLState(raw: unknown): MLState {
     lastDurationMs: nonNegative(input.lastDurationMs),
     sessionStartedAt: nonNegative(input.sessionStartedAt),
     sessions: normalizeSessions(input.sessions),
+    rank: normalizeRank(input.rank),
+    sessionRankFrom: parsePos(input.sessionRankFrom),
   };
 }
 

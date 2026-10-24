@@ -268,7 +268,7 @@ export function dispatch(event: GameEvent, options: DispatchOptions = {}): Dispa
   }
 
   if (result.state !== previous) {
-    if (options.record !== false) pushHistory(bus, game.id, previous);
+    if (options.record !== false && result.record !== false) pushHistory(bus, game.id, previous);
     bus.state = { ...bus.state, games: { ...bus.state.games, [game.id]: result.state } };
     scheduleSave(bus);
     publish(bus, { kind: "state", state: bus.state });

@@ -5,8 +5,10 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { Button } from "@/components/panel/ui";
 import { HOTKEY_ACTIONS, HOTKEY_LABELS, formatCombo } from "@/games/ml/hotkeys";
 import { defaultMLSettings, parseMLSettings, type MLSettings } from "@/games/ml/settings";
+import { rankLabel } from "@/games/ml/rank";
 import { LIMITS, ML_GAME_ID, type MLState } from "@/games/ml/state";
 import { HasilButtons } from "@/components/panel/ml/kontrol-hasil";
+import { RankControl, RankPrompt } from "@/components/panel/ml/kontrol-rank";
 import { useMatchTime } from "@/components/panel/ml/use-match-time";
 import { useLastResultText } from "@/components/panel/ml/use-result-status";
 import { sendEvent } from "@/lib/send-event";
@@ -67,7 +69,7 @@ function clamp(position: Position): Position {
 function statusLine(state: MLState | null): string {
   if (!state) return "Menunggu data dari server...";
   const { session, match } = state;
-  return `${session.wins}W ${session.losses}L · streak ${session.streak} · K${match.k} D${match.d} A${match.a}`;
+  return `${session.wins}W ${session.losses}L · streak ${session.streak} · K${match.k} D${match.d} A${match.a} · ${rankLabel(state.rank)}`;
 }
 
 export function KontrolPopup({ onClose }: { onClose: () => void }) {
@@ -192,9 +194,13 @@ function PopupBody({ onClose }: { onClose: () => void }) {
 
         <HasilButtons state={state} run={run} />
 
+        <RankPrompt state={state} run={run} compact />
+
         <div className="grid">
           <Button onClick={() => void run("undo")}>Undo</Button>
         </div>
+
+        {state && <RankControl state={state} run={run} storageKey="popup" />}
 
         <form
           className="flex gap-2"

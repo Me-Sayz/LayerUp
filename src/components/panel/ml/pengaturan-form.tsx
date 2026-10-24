@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { HotkeyCard } from "@/components/panel/ml/pengaturan-hotkey";
+import { RankDisplayCard, RankPositionCard } from "@/components/panel/ml/pengaturan-rank";
 import { Button, Card, ErrorNote, inputClass } from "@/components/panel/ui";
 import { Scoreboard } from "@/games/ml/hud/scoreboard";
 import {
@@ -18,7 +20,7 @@ import {
 } from "@/games/ml/settings";
 import { ML_GAME_ID, initialMLState, type MLState } from "@/games/ml/state";
 import { sendSettings } from "@/lib/send-settings";
-import { useGameSettings } from "@/lib/use-game-state";
+import { useGameSettings, useGameState } from "@/lib/use-game-state";
 
 const SAVED_MS = 2000;
 const PREVIEW_WIDTH = 440;
@@ -269,9 +271,27 @@ function ScoreboardSettingsCard({ saved, savedSession }: { saved: ScoreboardSett
 }
 
 // PAGE
+const SECTIONS = [
+  { id: "umum", label: "Umum" },
+  { id: "overlay", label: "Overlay" },
+] as const;
+type SectionId = (typeof SECTIONS)[number]["id"];
+
 export function PengaturanForm() {
   const stored = useGameSettings<MLSettings>(ML_GAME_ID);
+  const state = useGameState<MLState>(ML_GAME_ID);
+  const [section, setSection] = useState<SectionId>("overlay");
   const settings = parseMLSettings(stored);
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const index = SECTIONS.findIndex((item) => item.id === section);
+    const next = SECTIONS[(index + step + SECTIONS.length) % SECTIONS.length];
+    setSection(next.id);
+    event.currentTarget.querySelector<HTMLElement>(`#pengaturan-tab-${next.id}`)?.focus();
+  }
 
   if (!settings) {
     return (
@@ -282,9 +302,40 @@ export function PengaturanForm() {
   }
 
   return (
-    <div className="space-y-4">
-      <ScoreboardSettingsCard saved={settings.scoreboard} savedSession={settings.session} />
-      <HotkeyCard saved={settings.hotkeys} />
+    <div>
+      <div role="tablist" aria-label="Pengaturan" onKeyDown={onKeyDown} className="mb-5 flex gap-1 border-b border-panel-line">
+        {SECTIONS.map((item) => {
+          const active = item.id === section;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              id={`pengaturan-tab-${item.id}`}
+              aria-selected={active}
+              aria-controls={`pengaturan-panel-${item.id}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => setSection(item.id)}
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-panel-accent ${
+                active ? "border-panel-accent text-panel-text" : "border-transparent text-panel-muted hover:text-panel-text"
+              }`}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div role="tabpanel" id={`pengaturan-panel-${section}`} aria-labelledby={`pengaturan-tab-${section}`} className="space-y-4">
+        {section === "umum" && <HotkeyCard saved={settings.hotkeys} />}
+        {section === "overlay" && (
+          <>
+            <ScoreboardSettingsCard saved={settings.scoreboard} savedSession={settings.session} />
+            <RankDisplayCard saved={settings.rank} />
+            {state && <RankPositionCard state={state} />}
+          </>
+        )}
+      </div>
     </div>
   );
 }

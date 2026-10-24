@@ -28,6 +28,7 @@ export interface ReduceResult<S> {
   state: S;
   effects?: GameEffect[];
   schedule?: ScheduledEvent[];
+  record?: boolean;
 }
 
 export interface GameSettingsDefinition<T = unknown> {
