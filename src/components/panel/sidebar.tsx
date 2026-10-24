@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { GAME_MENUS, GENERAL_MENU, gameForPath, isActive, type MenuItem } from "@/games/menu";
+import { createClient } from "@/lib/supabase/client";
+import { SUPABASE_READY } from "@/lib/supabase/env";
 import { useStreamConnected } from "@/lib/use-game-state";
 
 function Brand() {
@@ -58,6 +60,52 @@ function Chevron({ open }: { open: boolean }) {
     </svg>
   );
 }
+
+// SECTION: AKUN
+function AccountBar() {
+  const router = useRouter();
+  const [email, setEmail] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!SUPABASE_READY) return;
+    let alive = true;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (alive) setEmail(data.user?.email ?? null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function signOut() {
+    if (busy) return;
+    setBusy(true);
+    await createClient().auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  }
+
+  if (!SUPABASE_READY) return null;
+  return (
+    <div className="flex items-center gap-2 border-t border-panel-line px-5 py-3">
+      <span className="min-w-0 flex-1 truncate text-xs text-panel-muted" title={email ?? undefined}>
+        {email ?? "Akun"}
+      </span>
+      <button
+        type="button"
+        onClick={() => void signOut()}
+        disabled={busy}
+        className="shrink-0 rounded-md border border-panel-line px-2.5 py-1 text-xs text-panel-text transition-colors hover:bg-panel-hover disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-panel-accent"
+      >
+        Keluar
+      </button>
+    </div>
+  );
+}
+// END AKUN
 
 function ConnectionStatus() {
   const connected = useStreamConnected();
@@ -130,6 +178,7 @@ function DesktopSidebar({ pathname }: { pathname: string }) {
     <aside className="hidden h-full w-60 shrink-0 flex-col border-r border-panel-line bg-panel-side md:flex">
       <Brand />
       <NavTree pathname={pathname} />
+      <AccountBar />
       <ConnectionStatus />
     </aside>
   );
@@ -179,6 +228,7 @@ function MobileMenu({ pathname }: { pathname: string }) {
             className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-panel-line bg-panel-side pt-12 shadow-2xl shadow-black/60"
           >
             <NavTree pathname={pathname} />
+            <AccountBar />
             <ConnectionStatus />
           </div>
         </div>

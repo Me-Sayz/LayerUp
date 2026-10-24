@@ -26,11 +26,13 @@ export function MiniPanel({
   label,
   summary,
   storageKey,
+  collapsedAction,
   children,
 }: {
   label: string;
   summary: string;
   storageKey: string;
+  collapsedAction?: ReactNode;
   children: ReactNode;
 }) {
   const [minimized, setMinimized] = useState(() => loadMinimized(storageKey));
@@ -50,24 +52,27 @@ export function MiniPanel({
             {summary}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={!minimized}
-          aria-label={minimized ? `Tampilkan kontrol ${label.toLowerCase()}` : `Sembunyikan kontrol ${label.toLowerCase()}`}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-panel-muted transition-colors hover:bg-panel-hover hover:text-panel-text focus-visible:outline-2 focus-visible:outline-panel-accent"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className={`h-4 w-4 transition-transform ${minimized ? "" : "rotate-180"}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden
+        <div className="flex shrink-0 items-center gap-1.5">
+          {minimized && collapsedAction}
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={!minimized}
+            aria-label={minimized ? `Tampilkan kontrol ${label.toLowerCase()}` : `Sembunyikan kontrol ${label.toLowerCase()}`}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-panel-muted transition-colors hover:bg-panel-hover hover:text-panel-text focus-visible:outline-2 focus-visible:outline-panel-accent"
           >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              className={`h-4 w-4 transition-transform ${minimized ? "" : "rotate-180"}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+        </div>
       </div>
       {!minimized && <div className="border-t border-panel-line px-3 py-2">{children}</div>}
     </div>

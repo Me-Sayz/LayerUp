@@ -20,7 +20,25 @@ export function TeksControl({ run, storageKey }: { run: Run; storageKey: string 
   }
 
   return (
-    <MiniPanel label="Teks bebas" summary={text || "Belum ada teks"} storageKey={`teks.${storageKey}`}>
+    <MiniPanel
+      label="Teks bebas"
+      summary={text || "Belum ada teks"}
+      storageKey={`teks.${storageKey}`}
+      collapsedAction={
+        <button
+          type="button"
+          disabled={!text}
+          onClick={() => void show(saved.text)}
+          aria-label="Tampilkan teks sekarang"
+          title="Tampilkan teks sekarang"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-panel-accent bg-panel-accent text-panel-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-panel-accent disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
+            <path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2z" />
+          </svg>
+        </button>
+      }
+    >
       <form
         className="flex gap-2"
         onSubmit={(event) => {

@@ -1,0 +1,15 @@
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import { SUPABASE_KEY, SUPABASE_URL } from "@/lib/supabase/env";
+
+export async function createClient() {
+  const store = await cookies();
+  return createServerClient(SUPABASE_URL, SUPABASE_KEY, {
+    cookies: {
+      getAll: () => store.getAll(),
+      setAll: (items) => {
+        for (const { name, value, options } of items) store.set(name, value, options);
+      },
+    },
+  });
+}
