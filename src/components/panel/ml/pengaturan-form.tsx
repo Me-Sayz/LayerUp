@@ -29,9 +29,7 @@ const PREVIEW_HEIGHT = 560;
 const GROUPS: { title: string; keys: ScoreboardKey[] }[] = [
   { title: "Judul", keys: ["title", "hero"] },
   { title: "Hasil sesi", keys: ["win", "lose", "streak", "winrate"] },
-  { title: "Match berjalan", keys: ["kill", "death", "assist", "ratio"] },
   { title: "Riwayat, target, dan timer", keys: ["history", "goalWin", "goalStreak", "goalLose", "timer"] },
-  { title: "Lainnya", keys: ["records"] },
 ];
 
 const GOAL_KEYS = { goalWin: "win", goalStreak: "streak", goalLose: "lose" } as const;
@@ -40,9 +38,7 @@ type GoalField = (typeof GOAL_KEYS)[keyof typeof GOAL_KEYS];
 const SAMPLE: MLState = {
   ...initialMLState(),
   hero: "Gusion",
-  match: { k: 7, d: 2, a: 11 },
   session: { wins: 5, losses: 2, streak: 3, best: 4 },
-  records: { firstblood: 1, doublekill: 2, triplekill: 1, maniac: 0, savage: 0, legendary: 0, mvp: 1 },
   results: ["W", "W", "L", "W", "W", "L", "W", "W"],
   lastDurationMs: 754_000,
 };
@@ -264,7 +260,7 @@ function ScoreboardSettingsCard({ saved, savedSession }: { saved: ScoreboardSett
 
       <p className="mt-4 text-xs text-panel-muted">
         Di LIVE Studio, lebar kartu selalu sama dengan lebar kotak sumber, dan tingginya mengikuti isi. Tarik tepi bawah kotak ke atas
-        sampai tidak ada ruang kosong. Sisakan sedikit tinggi kalau chip rekor atau riwayat aktif, karena kartu bertambah tinggi saat isinya muncul.
+        sampai tidak ada ruang kosong. Sisakan sedikit tinggi kalau riwayat, target, atau timer aktif, karena kartu bertambah tinggi saat isinya muncul.
       </p>
     </Card>
   );

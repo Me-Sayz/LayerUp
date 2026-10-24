@@ -7,12 +7,7 @@ export const SCOREBOARD_KEYS = [
   "win",
   "lose",
   "streak",
-  "kill",
-  "death",
-  "assist",
-  "ratio",
   "winrate",
-  "records",
   "history",
   "timer",
   "goalWin",
@@ -49,16 +44,11 @@ export interface MLSettings {
 
 export const SCOREBOARD_LABELS: Record<ScoreboardKey, string> = {
   title: "Judul Mobile Legends",
-  hero: "Nama hero",
+  hero: "Nama hero (tampil selama match berjalan)",
   win: "Menang (WIN)",
   lose: "Kalah (LOSE)",
   streak: "Streak",
-  kill: "Kill (K)",
-  death: "Death (D)",
-  assist: "Assist (A)",
-  ratio: "Rasio KDA",
   winrate: "Bar win rate (WR)",
-  records: "Chip rekor (First Blood, dll)",
   history: "Riwayat match (W/L)",
   timer: "Timer match",
   goalWin: "Target menang",
@@ -66,7 +56,7 @@ export const SCOREBOARD_LABELS: Record<ScoreboardKey, string> = {
   goalLose: "Batas kalah",
 };
 
-const DEFAULT_ON: readonly ScoreboardKey[] = SCOREBOARD_KEYS.slice(0, 11);
+const DEFAULT_ON: readonly ScoreboardKey[] = ["title", "hero", "win", "lose", "streak", "winrate"];
 
 function only(on: readonly ScoreboardKey[]): ScoreboardSettings {
   const result = {} as ScoreboardSettings;
@@ -79,7 +69,6 @@ export const SCOREBOARD_PRESETS: readonly { id: string; label: string; values: S
   { id: "standar", label: "Standar", values: only(DEFAULT_ON) },
   { id: "inti", label: "Inti live", values: only(["win", "lose", "streak", "winrate", "history"]) },
   { id: "winlose", label: "Win/Lose saja", values: only(["win", "lose"]) },
-  { id: "kda", label: "KDA saja", values: only(["kill", "death", "assist", "ratio"]) },
   { id: "lengkap", label: "Lengkap", values: only(SCOREBOARD_KEYS) },
 ];
 // END PRESET

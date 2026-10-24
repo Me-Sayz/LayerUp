@@ -1,15 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react";
-import {
-  ANNOUNCE_EFFECT,
-  LABELS,
-  LIMITS,
-  ML_GAME_ID,
-  isAnnounceId,
-  isResultId,
-  type ShownId,
-} from "@/games/ml/state";
+import { ANNOUNCE_EFFECT, LABELS, LIMITS, ML_GAME_ID, isResultId, type ResultId } from "@/games/ml/state";
 import type { GameEffect } from "@/lib/types";
 import { FIT_H, FIT_W, fitUnit, fitVar, onFontsReady, writeFit } from "@/lib/overlay-fit";
 import { useGameEffects } from "@/lib/use-game-state";
@@ -27,32 +19,25 @@ const u = (n: number | string) => `calc(var(--u) * ${n})`;
 const FIT_WIDTH = fitVar(FIT_W, DEFAULT_WIDTH);
 const FIT_HEIGHT = fitVar(FIT_H, DEFAULT_HEIGHT);
 
-type BannerId = ShownId | "custom";
-type Tier = 1 | 2 | 3 | 4 | 5;
-type IconKind = "skull" | "star" | "crown";
+type BannerId = ResultId | "custom";
+type Tier = 2 | 3 | 4;
+type IconKind = "crown";
 
 interface Style {
   tier: Tier;
   color: string;
   holdMs: number;
   icon: IconKind | null;
+  sparks: number;
 }
 
 const STYLES: Record<BannerId, Style> = {
-  firstblood: { tier: 1, color: "#ff4d5e", holdMs: 2000, icon: "skull" },
-  shutdown: { tier: 1, color: "#3ddc97", holdMs: 2000, icon: "skull" },
-  doublekill: { tier: 2, color: "#ffb347", holdMs: 2300, icon: "skull" },
-  mvp: { tier: 2, color: "#8fe3ff", holdMs: 2600, icon: "star" },
-  custom: { tier: 2, color: "#ffe39a", holdMs: 2600, icon: null },
-  triplekill: { tier: 3, color: "#ff8a3d", holdMs: 2600, icon: "skull" },
-  defeat: { tier: 3, color: "#9aa7d9", holdMs: 4000, icon: null },
-  maniac: { tier: 4, color: "#ff5fa2", holdMs: 3000, icon: "skull" },
-  victory: { tier: 4, color: "#f2c14e", holdMs: 4000, icon: "crown" },
-  savage: { tier: 5, color: "#b36bff", holdMs: 3400, icon: "skull" },
-  legendary: { tier: 5, color: "#f2c14e", holdMs: 3400, icon: "skull" },
+  custom: { tier: 2, color: "#ffe39a", holdMs: 2800, icon: null, sparks: 0 },
+  defeat: { tier: 3, color: "#9aa7d9", holdMs: 4000, icon: null, sparks: 0 },
+  victory: { tier: 4, color: "#f2c14e", holdMs: 4200, icon: "crown", sparks: 16 },
 };
 
-const FONT_SIZE: Record<Tier, number> = { 1: 110, 2: 140, 3: 160, 4: 185, 5: 210 };
+const FONT_SIZE: Record<Tier, number> = { 2: 140, 3: 160, 4: 185 };
 
 interface Item {
   key: number;
@@ -78,6 +63,11 @@ const HALO_FRAMES: Keyframe[] = [
   { opacity: 0.16, transform: "translate(-50%, -50%) scale(1)", offset: 1 },
 ];
 
+const SHEEN_FRAMES: Keyframe[] = [
+  { backgroundPosition: "130% 0, 0 0" },
+  { backgroundPosition: "-30% 0, 0 0" },
+];
+
 const SHAKE_FRAMES: Keyframe[] = [
   { transform: "translate(0, 0)", offset: 0 },
   { transform: "translate(-1%, 1.5%)", offset: 0.15 },
@@ -97,34 +87,21 @@ function readBannerId(effect: GameEffect): { id: BannerId; label: string } | nul
     if (typeof text !== "string" || !text.trim()) return null;
     return { id, label: text.trim().slice(0, LIMITS.customText) };
   }
-  if (isAnnounceId(id) || isResultId(id)) return { id, label: LABELS[id] };
+  if (isResultId(id)) return { id, label: LABELS[id] };
   return null;
 }
 
-function Icon({ kind, size }: { kind: IconKind; size: number }) {
-  const style = { width: u(size), height: u(size) } as const;
-  if (kind === "star") {
-    return (
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden style={style}>
-        <path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8-6.1-3.3-6.1 3.3 1.4-6.8-5.1-4.7 6.9-.8z" />
-      </svg>
-    );
-  }
-  if (kind === "crown") {
-    return (
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden style={style}>
-        <path d="M2 7l5 4 5-7 5 7 5-4-2 12H4z" />
-      </svg>
-    );
-  }
+function Icon({ size }: { size: number }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden style={style}>
-      <path
-        fillRule="evenodd"
-        d="M12 2a8 8 0 0 0-8 8c0 2.6 1.2 4.5 3 5.8V19a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3.2c1.8-1.3 3-3.2 3-5.8a8 8 0 0 0-8-8zM8.5 11.5a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6zm7 0a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6z"
-      />
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ width: u(size), height: u(size) }}>
+      <path d="M2 7l5 4 5-7 5 7 5-4-2 12H4z" />
     </svg>
   );
+}
+
+function seeded(key: number, index: number, salt: number): number {
+  const x = Math.sin((key + 1) * 12.9898 + index * 78.233 + salt * 37.719) * 43758.5453;
+  return x - Math.floor(x);
 }
 
 function Banner({ item, onDone }: { item: Item; onDone: () => void }) {
@@ -134,6 +111,7 @@ function Banner({ item, onDone }: { item: Item; onDone: () => void }) {
   const barRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
+  const sparksRef = useRef<HTMLDivElement>(null);
   const doneRef = useRef(onDone);
   const { style } = item;
 
@@ -160,7 +138,27 @@ function Banner({ item, onDone }: { item: Item; onDone: () => void }) {
       [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }],
       { duration: 700, delay: 120, easing: "cubic-bezier(.2, .8, .2, 1)", fill: "both" },
     );
+    textRef.current?.animate(SHEEN_FRAMES, { duration: 900, delay: IN_MS - 150, easing: "ease-in-out", fill: "both" });
     if (style.tier >= 4) shakeRef.current?.animate(SHAKE_FRAMES, { duration: 500 });
+
+    const rise = root.clientHeight;
+    Array.from(sparksRef.current?.children ?? []).forEach((spark, index) => {
+      const dx = (seeded(item.key, index, 3) - 0.5) * root.clientWidth * 0.12;
+      const dy = rise * (0.55 + seeded(item.key, index, 4) * 0.7);
+      spark.animate(
+        [
+          { transform: "translate(0, 0) rotate(45deg) scale(0)", opacity: 0, offset: 0 },
+          { transform: `translate(${dx * 0.3}px, ${-dy * 0.25}px) rotate(45deg) scale(1)`, opacity: 1, offset: 0.2 },
+          { transform: `translate(${dx}px, ${-dy}px) rotate(45deg) scale(0.4)`, opacity: 0, offset: 1 },
+        ],
+        {
+          duration: 1500 + seeded(item.key, index, 5) * 1100,
+          delay: 200 + seeded(item.key, index, 6) * 700,
+          easing: "ease-out",
+          fill: "both",
+        },
+      );
+    });
 
     const leave = setTimeout(() => {
       root.animate(OUT_FRAMES, { duration: OUT_MS, easing: "ease-in", fill: "forwards" });
@@ -178,8 +176,27 @@ function Banner({ item, onDone }: { item: Item; onDone: () => void }) {
       <div
         ref={rootRef}
         className="flex flex-col items-center"
-        style={{ width: u(FIT_WIDTH), opacity: 0, color: style.color, ["--c" as string]: style.color }}
+        style={{ position: "relative", width: u(FIT_WIDTH), opacity: 0, color: style.color, ["--c" as string]: style.color }}
       >
+        {style.sparks > 0 && (
+          <div ref={sparksRef} aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+            {Array.from({ length: style.sparks }, (_, index) => (
+              <span
+                key={index}
+                style={{
+                  position: "absolute",
+                  left: `${8 + seeded(item.key, index, 1) * 84}%`,
+                  top: `${45 + seeded(item.key, index, 2) * 40}%`,
+                  width: u(9 + seeded(item.key, index, 7) * 9),
+                  height: u(9 + seeded(item.key, index, 7) * 9),
+                  background: index % 3 === 0 ? "#ffffff" : "var(--c)",
+                  opacity: 0,
+                  boxShadow: `0 0 ${u(10)} var(--c)`,
+                }}
+              />
+            ))}
+          </div>
+        )}
         <BannerFace
           label={item.label}
           style={style}
@@ -210,7 +227,7 @@ function BannerFace({
 }) {
   return (
     <>
-      {haloRef && style.tier > 1 && (
+      {haloRef && (
         <div
           ref={haloRef}
           aria-hidden
@@ -228,7 +245,7 @@ function BannerFace({
       )}
       {style.icon && (
         <div style={{ marginBottom: u(6), filter: `drop-shadow(0 ${u(5)} ${u(8)} rgba(0, 0, 0, 0.4))` }}>
-          <Icon kind={style.icon} size={76} />
+          <Icon size={76} />
         </div>
       )}
       <div ref={fitRef} style={{ transform: "scale(var(--fit, 1))" }}>
@@ -241,7 +258,11 @@ function BannerFace({
             letterSpacing: "0.02em",
             padding: `0 ${u(34)}`,
             whiteSpace: "nowrap",
-            background: "linear-gradient(180deg, #ffffff 12%, var(--c) 118%)",
+            background:
+              "linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, 0.95) 50%, transparent 62%), linear-gradient(180deg, #ffffff 12%, var(--c) 118%)",
+            backgroundSize: "260% 100%, 100% 100%",
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "130% 0, 0 0",
             WebkitBackgroundClip: "text",
             backgroundClip: "text",
             color: "transparent",
@@ -251,15 +272,11 @@ function BannerFace({
           {label}
         </span>
       </div>
-      <div
-        ref={barRef}
-        style={{
-          width: "82%",
-          height: u(6),
-          borderRadius: u(3),
-          background: "linear-gradient(90deg, transparent, var(--c) 30%, var(--c) 70%, transparent)",
-        }}
-      />
+      <div ref={barRef} className="flex items-center justify-center" style={{ width: "86%", gap: u(10), marginTop: u(2) }}>
+        <span style={{ flex: 1, height: u(4), borderRadius: u(2), background: "linear-gradient(90deg, transparent, var(--c))" }} />
+        <span style={{ width: u(14), height: u(14), transform: "rotate(45deg)", background: "var(--c)", boxShadow: `0 0 ${u(12)} var(--c)` }} />
+        <span style={{ flex: 1, height: u(4), borderRadius: u(2), background: "linear-gradient(270deg, transparent, var(--c))" }} />
+      </div>
     </>
   );
 }

@@ -1,5 +1,5 @@
-import { KontrolTabs } from "@/components/panel/ml/kontrol-tabs";
+import { KontrolSesi } from "@/components/panel/ml/kontrol-sesi";
 
 export default function Page() {
-  return <KontrolTabs />;
+  return <KontrolSesi />;
 }

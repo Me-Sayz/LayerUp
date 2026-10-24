@@ -10,7 +10,7 @@ import {
   type ScoreboardSettings,
   type SessionSettings,
 } from "@/games/ml/settings";
-import { LABELS, ML_GAME_ID, RECORDED_IDS, type MLState, type RecordedId } from "@/games/ml/state";
+import { ML_GAME_ID, type MLState } from "@/games/ml/state";
 import { FIT_H, fitUnit, fitVar, onFontsReady, writeFit } from "@/lib/overlay-fit";
 import { useGameSettings, useGameState } from "@/lib/use-game-state";
 
@@ -20,11 +20,8 @@ const FRAME = 48;
 const MIN_INNER = 180;
 const WINRATE_MIN = 150;
 const TITLE_ROW = { both: 392, title: 260, hero: 180 } as const;
-const RECORDS_MIN = 300;
 const TOP_GAP = 10;
-const MATCH_GAP = 8;
 const TOP_WIDTH = { win: 118, lose: 118, streak: 136 } as const;
-const MATCH_WIDTH = { kill: 84, death: 84, assist: 84, ratio: 114 } as const;
 const MARK_SIZE = 26;
 const MARK_GAP = 6;
 const GOAL_MIN = 260;
@@ -33,16 +30,6 @@ const EXTRA_GAP = 10;
 const u = (n: number) => `calc(var(--u) * ${n})`;
 const CUT = u(22);
 const CUT_SHAPE = `polygon(0 0, calc(100% - ${CUT}) 0, 100% ${CUT}, 100% 100%, ${CUT} 100%, 0 calc(100% - ${CUT}))`;
-
-const CHIP_COLORS: Record<RecordedId, string> = {
-  firstblood: "#ff4d5e",
-  doublekill: "#ffb347",
-  triplekill: "#ff8a3d",
-  maniac: "#ff5fa2",
-  savage: "#b36bff",
-  legendary: "#f2c14e",
-  mvp: "#8fe3ff",
-};
 
 function PopNumber({ value, size, className }: { value: number | string; size: number; className: string }) {
   const ref = useRef<HTMLElement>(null);
@@ -221,24 +208,20 @@ export function Scoreboard({
 
   useEffect(() => onFontsReady(() => measureHeight(rootRef.current)), []);
 
-  const { match, session, records, hero } = state;
+  const { session, hero } = state;
   const played = session.wins + session.losses;
   const winRate = played === 0 ? null : Math.round((session.wins / played) * 100);
-  const ratio = ((match.k + match.a) / Math.max(1, match.d)).toFixed(1);
   const streakOn = session.streak > 0;
   const streakHot = session.streak >= 3;
-  const chips = settings.records ? RECORDED_IDS.filter((id) => records[id] > 0) : [];
+  const heroOn = state.matchStartedAt > 0 || state.lastDurationMs > 0;
 
   const topKeys = (["win", "lose", "streak"] as const).filter((key) => settings[key]);
-  const matchKeys = (["kill", "death", "assist"] as const).filter((key) => settings[key]);
-  const matchCount = matchKeys.length + (settings.ratio ? 1 : 0);
   const goalKeys = (["goalWin", "goalStreak", "goalLose"] as const).filter((key) => settings[key]);
   const extras = settings.history || settings.timer || goalKeys.length > 0;
   const visible = [
     settings.title || settings.hero,
     topKeys.length > 0,
-    matchCount > 0,
-    settings.winrate || chips.length > 0,
+    settings.winrate,
     extras,
   ];
   const { goals, historyCount } = sessionSettings;
@@ -250,12 +233,7 @@ export function Scoreboard({
   const innerWidth = Math.max(
     MIN_INNER,
     headerWidth,
-    settings.records ? RECORDS_MIN : 0,
     span(topKeys.map((key) => TOP_WIDTH[key]), TOP_GAP),
-    span(
-      [...matchKeys.map((key) => MATCH_WIDTH[key]), ...(settings.ratio ? [MATCH_WIDTH.ratio] : [])],
-      MATCH_GAP,
-    ),
     settings.winrate ? WINRATE_MIN : 0,
     settings.history ? span(Array<number>(historyCount).fill(MARK_SIZE), MARK_GAP) : 0,
     goalKeys.length > 0 ? GOAL_MIN : 0,
@@ -308,7 +286,7 @@ export function Scoreboard({
                   {settings.hero && (
                     <span
                       className="truncate font-bold text-hud-ice"
-                      style={{ fontSize: u(21), maxWidth: u(180) }}
+                      style={{ fontSize: u(21), maxWidth: u(180), opacity: heroOn ? 1 : 0, transition: "opacity 0.4s" }}
                     >
                       {hero}
                     </span>
@@ -361,41 +339,7 @@ export function Scoreboard({
               )}
 
               {visible[2] && (
-                <div
-                  className="grid items-end"
-                  style={{
-                    gridTemplateColumns: [...matchKeys.map(() => "1fr"), ...(settings.ratio ? ["1.35fr"] : [])].join(" "),
-                    gap: u(MATCH_GAP),
-                    marginTop: gapAt(2, 12),
-                    paddingTop: first === 2 ? 0 : u(10),
-                    borderTop: first === 2 ? "none" : `${u(1)} solid rgba(255, 255, 255, 0.13)`,
-                  }}
-                >
-                  {(
-                    [
-                      ["K", "kill", match.k, "text-hud-gold-soft"],
-                      ["D", "death", match.d, "text-hud-red"],
-                      ["A", "assist", match.a, "text-hud-ice"],
-                    ] as const
-                  )
-                    .filter(([, key]) => settings[key])
-                    .map(([label, , value, color]) => (
-                      <div key={label} className={`flex items-baseline ${color}`} style={{ gap: u(6) }}>
-                        <i className="font-bold not-italic" style={{ fontSize: u(22) }}>{label}</i>
-                        <PopNumber value={value} size={64} className="" />
-                      </div>
-                    ))}
-                  {settings.ratio && (
-                    <div className="text-right" style={{ lineHeight: 1 }}>
-                      <b className="block font-hud-num font-semibold text-hud-gold" style={{ fontSize: u(46) }}>{ratio}</b>
-                      <i className="font-bold not-italic text-hud-muted" style={{ fontSize: u(17) }}>KDA</i>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {visible[3] && (
-              <div style={{ marginTop: gapAt(3, 14) }}>
+              <div style={{ marginTop: gapAt(2, 14) }}>
                 {settings.winrate && (
                   <div className="flex items-center" style={{ gap: u(12) }}>
                     <div
@@ -420,37 +364,17 @@ export function Scoreboard({
                     </em>
                   </div>
                 )}
-
-                {chips.length > 0 && (
-                  <div className="flex flex-wrap" style={{ gap: u(6), marginTop: settings.winrate ? u(11) : 0 }}>
-                    {chips.map((id) => (
-                      <span
-                        key={id}
-                        className="font-bold"
-                        style={{
-                          fontSize: u(17),
-                          padding: `${u(2)} ${u(10)}`,
-                          borderRadius: u(6),
-                          border: `${u(1)} solid ${CHIP_COLORS[id]}`,
-                          background: "rgba(255, 255, 255, 0.05)",
-                        }}
-                      >
-                        {LABELS[id]} x{records[id]}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
               )}
 
-              {visible[4] && (
+              {visible[3] && (
                 <div
                   className="flex flex-col"
                   style={{
                     gap: u(EXTRA_GAP),
-                    marginTop: gapAt(4, 14),
-                    paddingTop: first === 4 ? 0 : u(12),
-                    borderTop: first === 4 ? "none" : `${u(1)} solid rgba(255, 255, 255, 0.13)`,
+                    marginTop: gapAt(3, 14),
+                    paddingTop: first === 3 ? 0 : u(12),
+                    borderTop: first === 3 ? "none" : `${u(1)} solid rgba(255, 255, 255, 0.13)`,
                   }}
                 >
                   {settings.history && <HistoryStrip results={state.results} count={historyCount} />}

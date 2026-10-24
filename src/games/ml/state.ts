@@ -3,51 +3,12 @@ import { initialRank, normalizeRank, parsePos, type RankPos, type RankState } fr
 export const ML_GAME_ID = "ml";
 export const ANNOUNCE_EFFECT = "announce";
 
-export const KDA_EVENTS = ["kill", "death", "assist"] as const;
-export type KdaEvent = (typeof KDA_EVENTS)[number];
-
-export const RECORDED_IDS = [
-  "firstblood",
-  "doublekill",
-  "triplekill",
-  "maniac",
-  "savage",
-  "legendary",
-  "mvp",
-] as const;
-export type RecordedId = (typeof RECORDED_IDS)[number];
-
-export const ANNOUNCE_IDS = [...RECORDED_IDS, "shutdown"] as const;
-export type AnnounceId = (typeof ANNOUNCE_IDS)[number];
-
 export const RESULT_IDS = ["victory", "defeat"] as const;
 export type ResultId = (typeof RESULT_IDS)[number];
 
-export type ShownId = AnnounceId | ResultId;
-
-export const LABELS: Record<ShownId, string> = {
-  firstblood: "First Blood",
-  doublekill: "Double Kill",
-  triplekill: "Triple Kill",
-  maniac: "Maniac",
-  savage: "Savage",
-  legendary: "Legendary",
-  mvp: "MVP",
-  shutdown: "Shutdown",
+export const LABELS: Record<ResultId, string> = {
   victory: "Victory",
   defeat: "Defeat",
-};
-
-export interface KdaCounts {
-  k: number;
-  d: number;
-  a: number;
-}
-
-export const KDA_FIELD: Record<KdaEvent, keyof KdaCounts> = {
-  kill: "k",
-  death: "d",
-  assist: "a",
 };
 
 export interface SessionStats {
@@ -82,9 +43,7 @@ export const SESSION_COUNT_MAX = 9999;
 export interface MLState {
   hero: string;
   phase: Phase;
-  match: KdaCounts;
   session: SessionStats;
-  records: Record<RecordedId, number>;
   lastResultAt: number;
   results: ResultMark[];
   matchStartedAt: number;
@@ -96,28 +55,18 @@ export interface MLState {
 }
 
 export interface AnnouncePayload {
-  id: ShownId | "custom";
+  id: ResultId | "custom";
   text?: string;
 }
 
-export const LIMITS = { kdaMax: 99, heroName: 24, customText: 40 } as const;
+export const LIMITS = { heroName: 24, customText: 40 } as const;
 export const TIMING = { resetDelayMs: 10_000, resultGuardMs: 30_000 } as const;
 
 export function initialMLState(): MLState {
   return {
     hero: "",
     phase: "playing",
-    match: { k: 0, d: 0, a: 0 },
     session: { wins: 0, losses: 0, streak: 0, best: 0 },
-    records: {
-      firstblood: 0,
-      doublekill: 0,
-      triplekill: 0,
-      maniac: 0,
-      savage: 0,
-      legendary: 0,
-      mvp: 0,
-    },
     lastResultAt: 0,
     results: [],
     matchStartedAt: 0,
@@ -176,17 +125,23 @@ function normalizeSessions(value: unknown): SessionRecord[] {
   return result.slice(0, SESSION_ARCHIVE_MAX);
 }
 
+function normalizeSession(value: unknown): SessionStats {
+  const base = initialMLState().session;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return base;
+  const input = value as Partial<Record<keyof SessionStats, unknown>>;
+  return { wins: count(input.wins), losses: count(input.losses), streak: count(input.streak), best: count(input.best) };
+}
+
 export function normalizeMLState(raw: unknown): MLState {
   const base = initialMLState();
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return base;
   const input = raw as Partial<Record<keyof MLState, unknown>>;
-  const results = Array.isArray(input.results)
-    ? input.results.filter((mark): mark is ResultMark => mark === "W" || mark === "L").slice(-RESULT_HISTORY_MAX)
-    : [];
   return {
-    ...base,
-    ...(raw as Partial<MLState>),
-    results,
+    hero: typeof input.hero === "string" ? input.hero.slice(0, LIMITS.heroName) : "",
+    phase: input.phase === "ended" ? "ended" : "playing",
+    session: normalizeSession(input.session),
+    lastResultAt: nonNegative(input.lastResultAt),
+    results: marks(input.results),
     matchStartedAt: nonNegative(input.matchStartedAt),
     lastDurationMs: nonNegative(input.lastDurationMs),
     sessionStartedAt: nonNegative(input.sessionStartedAt),
@@ -194,18 +149,6 @@ export function normalizeMLState(raw: unknown): MLState {
     rank: normalizeRank(input.rank),
     sessionRankFrom: parsePos(input.sessionRankFrom),
   };
-}
-
-export function isKdaEvent(type: string): type is KdaEvent {
-  return (KDA_EVENTS as readonly string[]).includes(type);
-}
-
-export function isAnnounceId(type: string): type is AnnounceId {
-  return (ANNOUNCE_IDS as readonly string[]).includes(type);
-}
-
-export function isRecordedId(type: string): type is RecordedId {
-  return (RECORDED_IDS as readonly string[]).includes(type);
 }
 
 export function isResultId(type: string): type is ResultId {

@@ -1,7 +1,6 @@
 import type { GameDefinition, GameEffect, GameEvent, ReduceResult } from "@/lib/types";
 import {
   ANNOUNCE_EFFECT,
-  KDA_FIELD,
   LIMITS,
   RESULT_HISTORY_MAX,
   SESSION_ARCHIVE_MAX,
@@ -10,13 +9,8 @@ import {
   TIMING,
   initialMLState,
   normalizeMLState,
-  isAnnounceId,
-  isKdaEvent,
-  isRecordedId,
   isResultId,
-  type AnnounceId,
   type AnnouncePayload,
-  type KdaEvent,
   type MLState,
   type ResultId,
   type SessionRecord,
@@ -39,7 +33,7 @@ function readDelta(payload: Payload): number | null {
   const raw = payload?.delta;
   if (raw === undefined) return 1;
   if (typeof raw !== "number" || !Number.isInteger(raw)) return null;
-  if (raw === 0 || Math.abs(raw) > LIMITS.kdaMax) return null;
+  if (raw === 0 || Math.abs(raw) > SESSION_COUNT_MAX) return null;
   return raw;
 }
 
@@ -93,7 +87,6 @@ function reduceSessionResume(state: MLState, payload: Payload, at: number): Resu
     state: {
       ...state,
       phase: "playing",
-      match: { k: 0, d: 0, a: 0 },
       session: { wins: record.wins, losses: record.losses, streak: record.streak, best: record.best },
       results: record.results,
       sessionStartedAt: record.startedAt,
@@ -170,21 +163,6 @@ function reduceRankAuto(state: MLState, payload: Payload): Result {
   return withRank(state, { ...state.rank, auto: value }, false);
 }
 
-function reduceKda(state: MLState, type: KdaEvent, payload: Payload): Result {
-  const delta = readDelta(payload);
-  if (delta === null) return ignore(state);
-
-  const fresh = state.phase === "ended" && delta > 0;
-  const base: MLState = fresh
-    ? { ...state, phase: "playing", match: { k: 0, d: 0, a: 0 } }
-    : state;
-  const field = KDA_FIELD[type];
-  const next = Math.min(LIMITS.kdaMax, Math.max(0, base.match[field] + delta));
-  if (next === base.match[field] && !fresh) return ignore(state);
-
-  return { state: { ...base, match: { ...base.match, [field]: next } } };
-}
-
 function reduceResult(state: MLState, id: ResultId, at: number): Result {
   const elapsed = at - state.lastResultAt;
   if (state.lastResultAt > 0 && elapsed >= 0 && elapsed < TIMING.resultGuardMs) {
@@ -227,19 +205,10 @@ function reduceResult(state: MLState, id: ResultId, at: number): Result {
   };
 }
 
-function reduceAnnounce(state: MLState, id: AnnounceId): Result {
-  const effects = [announce({ id })];
-  if (!isRecordedId(id)) return { state, effects };
-  const records = { ...state.records, [id]: state.records[id] + 1 };
-  return { state: { ...state, records }, effects };
-}
-
 function reduce(state: MLState, event: GameEvent): Result {
   const { type, payload } = event;
 
-  if (isKdaEvent(type)) return reduceKda(state, type, payload);
   if (isResultId(type)) return reduceResult(state, type, event.at ?? Date.now());
-  if (isAnnounceId(type)) return reduceAnnounce(state, type);
 
   switch (type) {
     case "custom": {
@@ -248,7 +217,7 @@ function reduce(state: MLState, event: GameEvent): Result {
       return { state, effects: [announce({ id: "custom", text })] };
     }
     case "match_new": {
-      const fresh = { phase: "playing" as const, match: { k: 0, d: 0, a: 0 }, lastDurationMs: 0 };
+      const fresh = { phase: "playing" as const, lastDurationMs: 0 };
       if (payload?.onlyIfEnded === true) {
         if (state.phase !== "ended") return ignore(state);
         return { state: { ...state, ...fresh, matchStartedAt: 0 } };
