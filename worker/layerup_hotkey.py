@@ -1,6 +1,7 @@
 """LayerUp hotkey worker: dengar tombol global, kirim event ke server LayerUp."""
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -39,6 +40,39 @@ def load_token():
 
 
 TOKEN = load_token()
+TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
+
+
+def save_token(token):
+    try:
+        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+            f.write(token + "\n")
+        return True
+    except OSError:
+        return False
+
+
+def ask_token(reason):
+    global TOKEN
+    print()
+    print(reason)
+    print("Buka panel LayerUp > Pengaturan > Umum, klik Salin pada Token worker,")
+    print("lalu tempel di sini (klik kanan) dan tekan Enter. Kosongkan lalu Enter untuk batal.")
+    while True:
+        try:
+            raw = input("Token worker: ").strip().strip("\"'")
+        except (EOFError, KeyboardInterrupt):
+            return False
+        if not raw:
+            return False
+        if TOKEN_PATTERN.match(raw):
+            TOKEN = raw
+            if not save_token(raw):
+                print("Token dipakai, tapi gagal disimpan ke token.txt (akan ditanya lagi lain kali).")
+            else:
+                print("Token tersimpan.")
+            return True
+        print("Format token tidak cocok (harus 32-64 karakter huruf, angka, - atau _). Coba lagi.")
 
 
 def log(msg):
@@ -93,14 +127,27 @@ def send_event(action):
         return "server tidak terjangkau"
 
 
+def check_token():
+    try:
+        http_json("GET", "/api/state")
+        return "ok"
+    except urllib.error.HTTPError as e:
+        return "ditolak" if e.code == 401 else "ok"
+    except (urllib.error.URLError, OSError, ValueError):
+        return "offline"
+
+
 def send_heartbeat(bindings, offline=False):
     body = {"game": GAME, "hotkeys": bindings}
     if offline:
         body["offline"] = True
     try:
         http_json("POST", "/api/worker", body, timeout=2)
+    except urllib.error.HTTPError as e:
+        return e.code != 401
     except (urllib.error.URLError, OSError, ValueError):
         pass
+    return True
 
 
 class Worker:
@@ -110,6 +157,7 @@ class Worker:
         self.handles = []
         self.last_press = {}
         self.lock = threading.Lock()
+        self.rejected = False
 
     def press(self, action):
         now = time.monotonic()
@@ -150,7 +198,8 @@ class Worker:
         wanted = fetch_bindings()
         if wanted != self.bindings:
             self.apply(wanted)
-        send_heartbeat(self.bindings)
+        if not send_heartbeat(self.bindings):
+            self.rejected = True
 
 
 def is_admin():
@@ -169,11 +218,14 @@ def main():
     except ImportError:
         print("Library 'keyboard' belum terpasang. Jalankan: pip install keyboard")
         return 1
-    if not TOKEN:
-        print("Token belum diisi. Salin token worker dari Pengaturan > Umum di panel LayerUp,")
-        print("lalu tempel di file worker/token.txt (satu baris), atau set LAYERUP_TOKEN.")
-        return 1
     log(f"LayerUp hotkey worker, server {SERVER}")
+    if not TOKEN and not ask_token("Token worker belum diisi."):
+        print("Dibatalkan. Worker tidak jalan tanpa token.")
+        return 1
+    while check_token() == "ditolak":
+        if not ask_token("Token ditolak server (salah, atau sudah dibuat ulang)."):
+            print("Dibatalkan. Worker tidak jalan tanpa token yang benar.")
+            return 1
     if not is_admin():
         log("Catatan: berjalan tanpa admin. Kalau LIVE Studio atau game jalan sebagai admin, "
             "tombol mungkin tidak terbaca. Pakai jalankan-admin.bat.")
@@ -184,6 +236,11 @@ def main():
         while True:
             time.sleep(POLL_S)
             w.tick()
+            if w.rejected:
+                w.rejected = False
+                if not ask_token("Token ditolak server (mungkin dibuat ulang di panel)."):
+                    log("Token tidak diganti. Hotkey tidak akan terkirim sampai token benar.")
+                    time.sleep(30)
     except KeyboardInterrupt:
         keyboard.unhook_all()
         send_heartbeat({}, offline=True)

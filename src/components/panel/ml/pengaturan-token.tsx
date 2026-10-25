@@ -88,8 +88,8 @@ export function TokenCard() {
         </div>
       </label>
       <p className="mt-2 text-xs text-panel-muted">
-        Taruh token ini di file <span className="font-mono text-panel-text">worker/token.txt</span> (satu baris), atau set{" "}
-        <span className="font-mono text-panel-text">LAYERUP_TOKEN</span>.
+        Pertama kali menjalankan worker (<span className="font-mono text-panel-text">worker/jalankan.bat</span>), tempel token ini saat
+        diminta. Tersimpan otomatis, jadi tidak perlu mengubah file apa pun.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">

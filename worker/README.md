@@ -6,14 +6,15 @@ Default: Ctrl+1 Victory, Ctrl+2 Defeat, Ctrl+3 Undo, Ctrl+4 Match baru.
 
 ## Jalankan
 1. Pastikan server LayerUp jalan (`npm start`) dan kamu sudah login di panel.
-2. Buka Pengaturan > Umum, salin **token worker**, lalu tempel di file `worker/token.txt` (satu baris). Atau set `LAYERUP_TOKEN`.
+2. Buka Pengaturan > Umum, klik **Salin** pada token worker.
 3. Klik dua kali `jalankan.bat` (atau `jalankan-admin.bat` kalau LIVE Studio/game jalan sebagai admin).
+   Pertama kali, jendela worker meminta token: tempel (klik kanan) lalu Enter. Token tersimpan otomatis di `worker/token.txt`.
 4. Tekan kombinasi tombol, konsol menulis satu baris per tekanan.
 
 Server di alamat lain: set `LAYERUP_URL`, misalnya `set LAYERUP_URL=http://lvh.me:3000`.
 
 ## Catatan
-- Token seperti password: jangan dibagikan. Kalau bocor, buat ulang di Pengaturan > Umum lalu ganti isi `token.txt`.
+- Token seperti password: jangan dibagikan. Kalau bocor, buat ulang di Pengaturan > Umum. Worker akan meminta token baru otomatis.
 - Tombol diblokir selama worker jalan, jadi Ctrl+1..4 tidak berfungsi di aplikasi lain.
 - Tahan tombol tidak mengirim berulang (jeda 0,4 detik).
 - Kombinasi dibaca dari pengaturan server tiap 3 detik; kalau belum ada, pakai default.
