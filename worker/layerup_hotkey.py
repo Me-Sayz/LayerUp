@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 
 SERVER = os.environ.get("LAYERUP_URL", "http://localhost:3000").rstrip("/")
+TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.txt")
 GAME = "ml"
 DEBOUNCE_S = 0.4
 POLL_S = 3.0
@@ -24,6 +25,20 @@ LABELS = {
     "undo": "Undo",
     "match_new": "Match baru",
 }
+
+
+def load_token():
+    token = os.environ.get("LAYERUP_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        with open(TOKEN_FILE, encoding="utf-8") as f:
+            return f.readline().strip()
+    except OSError:
+        return ""
+
+
+TOKEN = load_token()
 
 
 def log(msg):
@@ -49,6 +64,7 @@ def clean_bindings(raw):
 def http_json(method, path, body=None, timeout=3):
     data = None if body is None else json.dumps(body).encode("utf-8")
     req = urllib.request.Request(SERVER + path, data=data, method=method)
+    req.add_header("Authorization", "Bearer " + TOKEN)
     if data is not None:
         req.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(req, timeout=timeout) as res:
@@ -70,6 +86,8 @@ def send_event(action):
         http_json("POST", "/api/events", {"game": GAME, "type": action, "source": "hotkey"})
         return None
     except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return "token ditolak, cek token.txt"
         return f"server menolak ({e.code})"
     except (urllib.error.URLError, OSError):
         return "server tidak terjangkau"
@@ -150,6 +168,10 @@ def main():
         import keyboard
     except ImportError:
         print("Library 'keyboard' belum terpasang. Jalankan: pip install keyboard")
+        return 1
+    if not TOKEN:
+        print("Token belum diisi. Salin token worker dari Pengaturan > Umum di panel LayerUp,")
+        print("lalu tempel di file worker/token.txt (satu baris), atau set LAYERUP_TOKEN.")
         return 1
     log(f"LayerUp hotkey worker, server {SERVER}")
     if not is_admin():

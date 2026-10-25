@@ -1,6 +1,5 @@
-import { readFileSync, promises as fs } from "node:fs";
-import path from "node:path";
 import { getGame, listGames } from "@/games/registry";
+import { getStore, takeLegacyState, type GameBlob } from "./store";
 import {
   UNDO_EVENT,
   type AppState,
@@ -22,9 +21,14 @@ export interface DispatchOptions {
 }
 
 interface Bus {
+  userId: string;
   state: AppState;
   listeners: Set<Listener>;
+  kicks: Set<() => void>;
   saveTimer: ReturnType<typeof setTimeout> | null;
+  saving: Promise<void> | null;
+  dirty: boolean;
+  touched: number;
   history: Map<GameId, unknown[]>;
   timers: Map<string, ReturnType<typeof setTimeout>>;
   workerTimers: Map<GameId, ReturnType<typeof setTimeout>>;
@@ -35,15 +39,29 @@ export interface WorkerReport {
   hotkeys?: Record<string, string>;
 }
 
-const STATE_FILE = path.join(process.cwd(), "data", "state.json");
-const SAVE_DELAY_MS = 300;
+interface Registry {
+  buses: Map<string, Bus>;
+  loading: Map<string, Promise<Bus>>;
+  sweeper: ReturnType<typeof setInterval> | null;
+}
+
+const SAVE_DELAY_MS = 1000;
+const SAVE_RETRY_MS = 5000;
 const HISTORY_LIMIT = 20;
 const WORKER_TIMEOUT_MS = 8000;
+const IDLE_MS = 10 * 60_000;
+const SWEEP_MS = 60_000;
 
-function isAppState(value: unknown): value is AppState {
-  if (typeof value !== "object" || value === null) return false;
-  const games = (value as { games?: unknown }).games;
-  return typeof games === "object" && games !== null && !Array.isArray(games);
+const holder = globalThis as typeof globalThis & { __layerupRegistry?: Registry };
+
+function registry(): Registry {
+  holder.__layerupRegistry ??= { buses: new Map(), loading: new Map(), sweeper: null };
+  const reg = holder.__layerupRegistry;
+  if (reg.sweeper === null) {
+    reg.sweeper = setInterval(() => void sweep(reg), SWEEP_MS);
+    reg.sweeper.unref?.();
+  }
+  return reg;
 }
 
 function normalizeSettings(stored: Record<GameId, unknown> | undefined): Record<GameId, unknown> {
@@ -63,49 +81,73 @@ function normalizeGames(stored: Record<GameId, unknown>): Record<GameId, unknown
   return result;
 }
 
-function loadInitialState(): AppState {
-  let base: AppState = { games: {} };
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(STATE_FILE, "utf8"));
-    if (isAppState(parsed)) base = parsed;
-  } catch {
-    // file belum ada atau rusak: mulai dari kosong
+function stateFromBlobs(blobs: Record<GameId, GameBlob>): AppState {
+  const games: Record<GameId, unknown> = {};
+  const settings: Record<GameId, unknown> = {};
+  for (const [id, blob] of Object.entries(blobs)) {
+    if (blob.state !== null && blob.state !== undefined) games[id] = blob.state;
+    if (blob.settings !== null && blob.settings !== undefined) settings[id] = blob.settings;
   }
-  return { games: normalizeGames(base.games), settings: normalizeSettings(base.settings) };
+  return { games: normalizeGames(games), settings: normalizeSettings(settings) };
 }
 
-const holder = globalThis as typeof globalThis & { __overlayBus?: Bus };
-
-function getBus(): Bus {
-  const existing = holder.__overlayBus;
-  if (existing) {
-    existing.history ??= new Map();
-    existing.timers ??= new Map();
-    existing.workerTimers ??= new Map();
-    return existing;
+async function loadBus(userId: string): Promise<Bus> {
+  const blobs = await getStore().loadGames(userId);
+  let imported = false;
+  let state: AppState;
+  if (Object.keys(blobs).length === 0) {
+    const legacy = await takeLegacyState();
+    imported = legacy !== null;
+    state = legacy
+      ? { games: normalizeGames(legacy.games), settings: normalizeSettings(legacy.settings) }
+      : { games: normalizeGames({}), settings: normalizeSettings(undefined) };
+  } else {
+    state = stateFromBlobs(blobs);
   }
   const bus: Bus = {
-    state: loadInitialState(),
+    userId,
+    state,
     listeners: new Set(),
+    kicks: new Set(),
     saveTimer: null,
+    saving: null,
+    dirty: false,
+    touched: Date.now(),
     history: new Map(),
     timers: new Map(),
     workerTimers: new Map(),
   };
-  holder.__overlayBus = bus;
+  ensureGames(bus);
+  if (imported) markDirty(bus);
   return bus;
+}
+
+async function getBus(userId: string): Promise<Bus> {
+  const reg = registry();
+  const existing = reg.buses.get(userId);
+  if (existing) {
+    existing.touched = Date.now();
+    return existing;
+  }
+  let pending = reg.loading.get(userId);
+  if (!pending) {
+    pending = loadBus(userId)
+      .then((bus) => {
+        reg.buses.set(userId, bus);
+        return bus;
+      })
+      .finally(() => reg.loading.delete(userId));
+    reg.loading.set(userId, pending);
+  }
+  return pending;
 }
 
 function ensureGames(bus: Bus): void {
   let games = bus.state.games;
   let settings = bus.state.settings ?? {};
   for (const game of listGames()) {
-    if (!(game.id in games)) {
-      games = { ...games, [game.id]: game.initialState() };
-    }
-    if (game.settings && !(game.id in settings)) {
-      settings = { ...settings, [game.id]: game.settings.initial() };
-    }
+    if (!(game.id in games)) games = { ...games, [game.id]: game.initialState() };
+    if (game.settings && !(game.id in settings)) settings = { ...settings, [game.id]: game.settings.initial() };
   }
   if (games !== bus.state.games || settings !== bus.state.settings) {
     bus.state = { ...bus.state, games, settings };
@@ -122,22 +164,61 @@ function publish(bus: Bus, message: StreamMessage): void {
   }
 }
 
-async function writeState(state: AppState): Promise<void> {
-  const tmp = `${STATE_FILE}.tmp`;
-  await fs.mkdir(path.dirname(STATE_FILE), { recursive: true });
-  await fs.writeFile(tmp, JSON.stringify({ ...state, worker: undefined }));
-  await fs.rename(tmp, STATE_FILE);
+// SECTION: SIMPAN
+async function saveNow(bus: Bus): Promise<void> {
+  if (bus.saving) await bus.saving;
+  if (!bus.dirty) return;
+  bus.dirty = false;
+  const snapshot = bus.state;
+  const store = getStore();
+  const run = (async () => {
+    try {
+      for (const game of listGames()) {
+        await store.saveGame(bus.userId, game.id, {
+          state: snapshot.games[game.id],
+          settings: snapshot.settings?.[game.id],
+        });
+      }
+    } catch (error) {
+      bus.dirty = true;
+      console.error("[bus] gagal menyimpan state:", error);
+      scheduleSave(bus, SAVE_RETRY_MS);
+    }
+  })();
+  bus.saving = run.finally(() => {
+    bus.saving = null;
+  });
+  await run;
 }
 
-function scheduleSave(bus: Bus): void {
+function scheduleSave(bus: Bus, delay = SAVE_DELAY_MS): void {
   if (bus.saveTimer) clearTimeout(bus.saveTimer);
   bus.saveTimer = setTimeout(() => {
     bus.saveTimer = null;
-    writeState(bus.state).catch((error) => {
-      console.error("[bus] gagal menyimpan state:", error);
-    });
-  }, SAVE_DELAY_MS);
+    void saveNow(bus);
+  }, delay);
 }
+
+function markDirty(bus: Bus): void {
+  bus.dirty = true;
+  scheduleSave(bus);
+}
+
+async function sweep(reg: Registry): Promise<void> {
+  const now = Date.now();
+  for (const [userId, bus] of reg.buses) {
+    const idle = bus.listeners.size === 0 && bus.timers.size === 0 && bus.workerTimers.size === 0;
+    if (!idle || now - bus.touched < IDLE_MS) continue;
+    if (bus.saveTimer) {
+      clearTimeout(bus.saveTimer);
+      bus.saveTimer = null;
+    }
+    await saveNow(bus);
+    const stillIdle = bus.listeners.size === 0 && bus.timers.size === 0 && !bus.dirty && Date.now() - bus.touched >= IDLE_MS;
+    if (stillIdle) reg.buses.delete(userId);
+  }
+}
+// END SIMPAN
 
 function pushHistory(bus: Bus, gameId: GameId, previous: unknown): void {
   const stack = bus.history.get(gameId) ?? [];
@@ -152,7 +233,7 @@ function scheduleEvent(bus: Bus, gameId: GameId, item: ScheduledEvent): void {
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
     bus.timers.delete(key);
-    dispatch({ ...item.event, game: gameId }, { record: false });
+    void dispatch(bus.userId, { ...item.event, game: gameId }, { record: false });
   }, Math.max(0, item.afterMs));
   bus.timers.set(key, timer);
 }
@@ -164,12 +245,12 @@ function undo(bus: Bus, gameId: GameId): DispatchResult {
   }
   const previous = stack.pop();
   bus.state = { ...bus.state, games: { ...bus.state.games, [gameId]: previous } };
-  scheduleSave(bus);
+  markDirty(bus);
   publish(bus, { kind: "state", state: bus.state });
   return { ok: true };
 }
 
-export function updateSettings(gameId: GameId, value: unknown): DispatchResult {
+export async function updateSettings(userId: string, gameId: GameId, value: unknown): Promise<DispatchResult> {
   const game = getGame(gameId);
   if (!game) {
     return { ok: false, status: 404, error: `Game tidak dikenal: ${gameId}` };
@@ -177,8 +258,7 @@ export function updateSettings(gameId: GameId, value: unknown): DispatchResult {
   if (!game.settings) {
     return { ok: false, status: 404, error: `Game ${gameId} tidak punya pengaturan` };
   }
-  const bus = getBus();
-  ensureGames(bus);
+  const bus = await getBus(userId);
   const current = bus.state.settings?.[gameId];
   const isPlain = (item: unknown): item is Record<string, unknown> =>
     typeof item === "object" && item !== null && !Array.isArray(item);
@@ -189,7 +269,7 @@ export function updateSettings(gameId: GameId, value: unknown): DispatchResult {
   }
 
   bus.state = { ...bus.state, settings: { ...bus.state.settings, [gameId]: parsed } };
-  scheduleSave(bus);
+  markDirty(bus);
   publish(bus, { kind: "state", state: bus.state });
   return { ok: true };
 }
@@ -206,12 +286,11 @@ function setWorkerStatus(bus: Bus, gameId: GameId, next: WorkerStatus): void {
   publish(bus, { kind: "state", state: bus.state });
 }
 
-export function reportWorker(gameId: GameId, report: WorkerReport): DispatchResult {
+export async function reportWorker(userId: string, gameId: GameId, report: WorkerReport): Promise<DispatchResult> {
   if (!getGame(gameId)) {
     return { ok: false, status: 404, error: `Game tidak dikenal: ${gameId}` };
   }
-  const bus = getBus();
-  ensureGames(bus);
+  const bus = await getBus(userId);
 
   const existing = bus.workerTimers.get(gameId);
   if (existing) clearTimeout(existing);
@@ -233,28 +312,36 @@ export function reportWorker(gameId: GameId, report: WorkerReport): DispatchResu
   return { ok: true };
 }
 
-export function getState(): AppState {
-  const bus = getBus();
-  ensureGames(bus);
+export async function getState(userId: string): Promise<AppState> {
+  const bus = await getBus(userId);
   return bus.state;
 }
 
-export function subscribe(listener: Listener): () => void {
-  const bus = getBus();
+export async function subscribe(userId: string, listener: Listener, onKick?: () => void): Promise<() => void> {
+  const bus = await getBus(userId);
   bus.listeners.add(listener);
+  if (onKick) bus.kicks.add(onKick);
   return () => {
     bus.listeners.delete(listener);
+    if (onKick) bus.kicks.delete(onKick);
+    bus.touched = Date.now();
   };
 }
 
-export function dispatch(event: GameEvent, options: DispatchOptions = {}): DispatchResult {
+export async function kickOverlays(userId: string): Promise<void> {
+  const bus = registry().buses.get(userId);
+  if (!bus) return;
+  for (const kick of [...bus.kicks]) kick();
+  bus.kicks.clear();
+}
+
+export async function dispatch(userId: string, event: GameEvent, options: DispatchOptions = {}): Promise<DispatchResult> {
   const game = getGame(event.game);
   if (!game) {
     return { ok: false, status: 404, error: `Game tidak dikenal: ${event.game}` };
   }
 
-  const bus = getBus();
-  ensureGames(bus);
+  const bus = await getBus(userId);
 
   if (event.type === UNDO_EVENT) return undo(bus, game.id);
 
@@ -270,7 +357,7 @@ export function dispatch(event: GameEvent, options: DispatchOptions = {}): Dispa
   if (result.state !== previous) {
     if (options.record !== false && result.record !== false) pushHistory(bus, game.id, previous);
     bus.state = { ...bus.state, games: { ...bus.state.games, [game.id]: result.state } };
-    scheduleSave(bus);
+    markDirty(bus);
     publish(bus, { kind: "state", state: bus.state });
   }
   for (const effect of result.effects ?? []) {

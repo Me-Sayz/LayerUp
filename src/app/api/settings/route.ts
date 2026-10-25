@@ -1,4 +1,5 @@
 import { updateSettings } from "@/lib/bus";
+import { requireTenant } from "@/lib/tenant";
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -7,6 +8,9 @@ function fail(status: number, error: string): Response {
 }
 
 export async function PUT(request: Request): Promise<Response> {
+  const tenant = await requireTenant(request, ["session"]);
+  if (tenant instanceof Response) return tenant;
+
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
     return fail(415, "Content-Type harus application/json");
@@ -32,7 +36,7 @@ export async function PUT(request: Request): Promise<Response> {
     return fail(400, "Game tidak valid");
   }
 
-  const result = updateSettings(game, settings);
+  const result = await updateSettings(tenant.userId, game, settings);
   if (!result.ok) {
     return fail(result.status, result.error);
   }

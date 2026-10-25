@@ -1,4 +1,5 @@
 import { reportWorker } from "@/lib/bus";
+import { requireTenant } from "@/lib/tenant";
 
 const MAX_BODY_BYTES = 4 * 1024;
 const MAX_HOTKEYS = 16;
@@ -26,6 +27,9 @@ function readHotkeys(value: unknown): Record<string, string> | null {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const tenant = await requireTenant(request, ["worker"]);
+  if (tenant instanceof Response) return tenant;
+
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
     return fail(415, "Content-Type harus application/json");
@@ -58,7 +62,7 @@ export async function POST(request: Request): Promise<Response> {
     return fail(400, "Hotkey tidak valid");
   }
 
-  const result = reportWorker(game, { online: offline !== true, hotkeys: parsedHotkeys });
+  const result = await reportWorker(tenant.userId, game, { online: offline !== true, hotkeys: parsedHotkeys });
   if (!result.ok) {
     return fail(result.status, result.error);
   }

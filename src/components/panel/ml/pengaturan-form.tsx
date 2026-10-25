@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { HotkeyCard } from "@/components/panel/ml/pengaturan-hotkey";
+import { TokenCard } from "@/components/panel/ml/pengaturan-token";
 import { RankDisplayCard, RankPositionCard } from "@/components/panel/ml/pengaturan-rank";
 import { Button, Card, ErrorNote, inputClass } from "@/components/panel/ui";
 import { Scoreboard } from "@/games/ml/hud/scoreboard";
@@ -323,7 +324,12 @@ export function PengaturanForm() {
       </div>
 
       <div role="tabpanel" id={`pengaturan-panel-${section}`} aria-labelledby={`pengaturan-tab-${section}`} className="space-y-4">
-        {section === "umum" && <HotkeyCard saved={settings.hotkeys} />}
+        {section === "umum" && (
+          <>
+            <HotkeyCard saved={settings.hotkeys} />
+            <TokenCard />
+          </>
+        )}
         {section === "overlay" && (
           <>
             <ScoreboardSettingsCard saved={settings.scoreboard} savedSession={settings.session} />

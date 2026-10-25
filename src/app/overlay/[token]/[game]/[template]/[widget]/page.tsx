@@ -14,7 +14,7 @@ export const instant = false;
 
 export default async function OverlayPage({
   params,
-}: PageProps<"/overlay/[game]/[template]/[widget]">) {
+}: PageProps<"/overlay/[token]/[game]/[template]/[widget]">) {
   const { game, template, widget } = await params;
   const element = WIDGETS[`${game}/${template}/${widget}`];
   if (!element) notFound();

@@ -4,6 +4,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { AppState, GameEffect, GameId, StreamMessage, WorkerStatus } from "@/lib/types";
 
 const STREAM_URL = "/api/stream";
+const OVERLAY_PATH = /^\/overlay\/([A-Za-z0-9_-]{32,64})\//;
 const RETRY_MS = 2000;
 
 type Snapshot = { state: AppState | null; connected: boolean };
@@ -40,7 +41,8 @@ function parseMessage(raw: string): StreamMessage | null {
 
 function connect(): void {
   if (source) return;
-  const es = new EventSource(STREAM_URL);
+  const token = OVERLAY_PATH.exec(window.location.pathname)?.[1];
+  const es = new EventSource(token ? `${STREAM_URL}?t=${token}` : STREAM_URL);
   source = es;
 
   es.onopen = () => {

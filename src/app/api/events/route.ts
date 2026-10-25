@@ -1,4 +1,5 @@
 import { dispatch } from "@/lib/bus";
+import { requireTenant } from "@/lib/tenant";
 import { isGameEvent } from "@/lib/types";
 
 const MAX_BODY_BYTES = 16 * 1024;
@@ -8,6 +9,9 @@ function fail(status: number, error: string): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const tenant = await requireTenant(request, ["session", "worker"]);
+  if (tenant instanceof Response) return tenant;
+
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
     return fail(415, "Content-Type harus application/json");
@@ -29,7 +33,7 @@ export async function POST(request: Request): Promise<Response> {
     return fail(400, "Bentuk event tidak valid");
   }
 
-  const result = dispatch(body);
+  const result = await dispatch(tenant.userId, body);
   if (!result.ok) {
     return fail(result.status, result.error);
   }
