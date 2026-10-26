@@ -1,4 +1,4 @@
-import { updateSettings } from "@/lib/bus";
+import { flushSave, updateSettings } from "@/lib/bus";
 import { requireTenant } from "@/lib/tenant";
 
 const MAX_BODY_BYTES = 16 * 1024;
@@ -40,5 +40,6 @@ export async function PUT(request: Request): Promise<Response> {
   if (!result.ok) {
     return fail(result.status, result.error);
   }
+  await flushSave(tenant.userId);
   return Response.json({ ok: true });
 }

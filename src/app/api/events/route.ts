@@ -1,4 +1,4 @@
-import { dispatch } from "@/lib/bus";
+import { dispatch, flushSave } from "@/lib/bus";
 import { requireTenant } from "@/lib/tenant";
 import { isGameEvent } from "@/lib/types";
 
@@ -37,5 +37,6 @@ export async function POST(request: Request): Promise<Response> {
   if (!result.ok) {
     return fail(result.status, result.error);
   }
+  await flushSave(tenant.userId);
   return Response.json({ ok: true });
 }

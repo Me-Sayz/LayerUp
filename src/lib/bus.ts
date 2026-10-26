@@ -202,6 +202,18 @@ function scheduleSave(bus: Bus, delay = SAVE_DELAY_MS): void {
   }, delay);
 }
 
+// Di Vercel fungsi bisa dibekukan setelah respons, jadi simpan dulu sebelum membalas.
+export async function flushSave(userId: string): Promise<void> {
+  if (!process.env.VERCEL) return;
+  const bus = registry().buses.get(userId);
+  if (!bus) return;
+  if (bus.saveTimer) {
+    clearTimeout(bus.saveTimer);
+    bus.saveTimer = null;
+  }
+  await saveNow(bus);
+}
+
 function markDirty(bus: Bus): void {
   bus.dirty = true;
   scheduleSave(bus);
