@@ -28,6 +28,7 @@ interface Bus {
   saveTimer: ReturnType<typeof setTimeout> | null;
   saving: Promise<void> | null;
   dirty: boolean;
+  dropped: boolean;
   touched: number;
   history: Map<GameId, unknown[]>;
   timers: Map<string, ReturnType<typeof setTimeout>>;
@@ -112,6 +113,7 @@ async function loadBus(userId: string): Promise<Bus> {
     saveTimer: null,
     saving: null,
     dirty: false,
+    dropped: false,
     touched: Date.now(),
     history: new Map(),
     timers: new Map(),
@@ -167,7 +169,7 @@ function publish(bus: Bus, message: StreamMessage): void {
 // SECTION: SIMPAN
 async function saveNow(bus: Bus): Promise<void> {
   if (bus.saving) await bus.saving;
-  if (!bus.dirty) return;
+  if (!bus.dirty || bus.dropped) return;
   bus.dirty = false;
   const snapshot = bus.state;
   const store = getStore();
@@ -180,6 +182,7 @@ async function saveNow(bus: Bus): Promise<void> {
         });
       }
     } catch (error) {
+      if (bus.dropped) return;
       bus.dirty = true;
       console.error("[bus] gagal menyimpan state:", error);
       scheduleSave(bus, SAVE_RETRY_MS);
@@ -367,4 +370,23 @@ export async function dispatch(userId: string, event: GameEvent, options: Dispat
     scheduleEvent(bus, game.id, item);
   }
   return { ok: true };
+}
+
+export async function dropUser(userId: string): Promise<void> {
+  const reg = registry();
+  const bus = reg.buses.get(userId) ?? (await reg.loading.get(userId)?.catch(() => undefined));
+  reg.buses.delete(userId);
+  reg.loading.delete(userId);
+  if (!bus) return;
+  bus.dropped = true;
+  bus.dirty = false;
+  if (bus.saveTimer) clearTimeout(bus.saveTimer);
+  bus.saveTimer = null;
+  for (const timer of bus.timers.values()) clearTimeout(timer);
+  for (const timer of bus.workerTimers.values()) clearTimeout(timer);
+  bus.timers.clear();
+  bus.workerTimers.clear();
+  for (const kick of [...bus.kicks]) kick();
+  bus.kicks.clear();
+  bus.listeners.clear();
 }

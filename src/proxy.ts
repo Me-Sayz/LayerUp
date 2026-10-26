@@ -2,6 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_KEY, SUPABASE_READY, SUPABASE_URL } from "@/lib/supabase/env";
 
+const PUBLIC_PATHS = new Set(["/login", "/lupa-sandi", "/syarat", "/privasi"]);
+
 function redirectTo(request: NextRequest, path: string, from?: Response) {
   const url = request.nextUrl.clone();
   url.pathname = path;
@@ -12,8 +14,9 @@ function redirectTo(request: NextRequest, path: string, from?: Response) {
 }
 
 export async function proxy(request: NextRequest) {
-  const onLogin = request.nextUrl.pathname === "/login";
-  if (!SUPABASE_READY) return onLogin ? NextResponse.next() : redirectTo(request, "/login");
+  const path = request.nextUrl.pathname;
+  const isPublic = PUBLIC_PATHS.has(path);
+  if (!SUPABASE_READY) return isPublic ? NextResponse.next() : redirectTo(request, "/login");
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -30,8 +33,8 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const loggedIn = Boolean(data?.claims);
 
-  if (!loggedIn && !onLogin) return redirectTo(request, "/login", response);
-  if (loggedIn && onLogin) return redirectTo(request, "/", response);
+  if (!loggedIn && !isPublic) return redirectTo(request, "/login", response);
+  if (loggedIn && path === "/login") return redirectTo(request, "/", response);
   return response;
 }
 

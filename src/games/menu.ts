@@ -11,7 +11,10 @@ export interface GameMenu {
   items: MenuItem[];
 }
 
-export const GENERAL_MENU: MenuItem[] = [{ label: "Beranda", href: "/" }];
+export const GENERAL_MENU: MenuItem[] = [
+  { label: "Beranda", href: "/" },
+  { label: "Akun", href: "/akun" },
+];
 
 // MENU: tambahkan menu game baru di array ini
 export const GAME_MENUS: GameMenu[] = [
